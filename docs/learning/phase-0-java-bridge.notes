@@ -1,0 +1,383 @@
+==============================================================================
+ PHASE 0 NOTES - THE JAVA BRIDGE  (written in simple language)
+==============================================================================
+
+Goal of Phase 0:
+  Get comfortable with Java and Maven BEFORE building the real analyzer.
+  We built a tiny program that holds facts about some files, groups them
+  by package, and prints a neat sorted list. Nothing is analyzed for real
+  yet. The numbers are typed in by hand.
+
+Think of Phase 0 as learning to drive in an empty parking lot before
+driving on the road.
+
+
+------------------------------------------------------------------------------
+ PART 1 - HOW JAVA CODE BECOMES A RUNNING PROGRAM
+------------------------------------------------------------------------------
+
+Three steps. Remember them as WRITE -> TRANSLATE -> RUN.
+
+  1. WRITE     You write FileMetrics.java. This is just text for humans.
+
+  2. TRANSLATE javac (the Java compiler) reads your text and produces
+               FileMetrics.class. That file holds "bytecode".
+               Bytecode is a simple instruction language that no real CPU
+               understands directly, but every JVM does.
+
+  3. RUN       The JVM (Java Virtual Machine) reads the .class file and
+               executes it on your actual computer.
+
+Everyday picture:
+  .java     = a recipe written in English
+  javac     = a translator turning it into a universal kitchen code
+  .class    = the recipe in universal kitchen code
+  JVM       = a kitchen robot that can cook any recipe in that code,
+              whether the kitchen is Mac, Windows, or Linux
+
+This is why Java says "write once, run anywhere". The same .class file
+runs on any computer that has a JVM.
+
+Words you will hear:
+  JDK = Java Development Kit = JVM + javac + other tools. Developers need it.
+  JRE = Java Runtime Environment = only the JVM + libraries. Enough to RUN.
+  JVM = the robot that actually runs bytecode.
+
+Where you can SEE this in our project:
+  backend/src/main/java/.../FileMetrics.java       <- your text  (step 1)
+  backend/target/classes/.../FileMetrics.class     <- bytecode   (step 2)
+  java -cp target/classes dev.codepulse.Phase0Main <- run it     (step 3)
+
+
+------------------------------------------------------------------------------
+ PART 2 - MAVEN: THE BUILD ASSISTANT
+------------------------------------------------------------------------------
+
+What problem does Maven solve?
+  Without Maven you would type javac commands by hand for every file,
+  download JUnit yourself, and remember the right order of steps.
+  Maven does all of that from one file: pom.xml.
+
+If you know npm:  pom.xml          is like package.json
+                  ~/.m2/repository is like node_modules (but shared)
+                  ./mvnw test      is like npm test
+
+Maven works in fixed STEPS called "lifecycle phases". Asking for a step
+runs every step before it:
+
+  validate      -> is pom.xml okay?
+  compile       -> turn src/main/java into bytecode   (target/classes)
+  test-compile  -> turn src/test/java into bytecode   (target/test-classes)
+  test          -> run the tests
+  package       -> build a .jar file (not needed yet)
+
+So when you type  ./mvnw test  Maven ALSO compiles first.
+
+What is mvnw? (the "Maven Wrapper")
+  A small script saved in the project. It downloads the EXACT Maven
+  version written in .mvn/wrapper/maven-wrapper.properties (3.9.16).
+  Your laptop, a friend's laptop, and a CI server all build with the
+  same Maven. No "works on my machine" problems.
+
+What is in our pom.xml?
+  - Java version 21
+  - ONE dependency: JUnit, with "test scope" = used only for tests,
+    never shipped inside the final program
+  - Two plugins: compiler (does "compile") and surefire (does "test")
+
+
+------------------------------------------------------------------------------
+ PART 3 - CLASS, OBJECT, INTERFACE, RECORD
+------------------------------------------------------------------------------
+
+  CLASS     = a blueprint. "A house has rooms and a door."
+  OBJECT    = one real thing built from the blueprint. "My house."
+              You make one with  new  :  new PackageSummary(list)
+  INTERFACE = a promise of what something can DO, with no data.
+              "Anything that is a Vehicle can drive()."
+              (We will use one in Phase 1 for reading source files.)
+  RECORD    = a short special class made only to CARRY DATA that
+              never changes.
+
+Our record, in one line:
+
+  public record FileMetrics(String relativePath, String packageName,
+                            int physicalLoc, int methodCount) { }
+
+From that one line Java writes FOR you:
+  - a constructor:  new FileMetrics("A.java", "p", 10, 1)
+  - getters:        m.relativePath()   m.physicalLoc()   ...
+                    (note: NOT getRelativePath())
+  - equals()        two records with the same 4 values are "equal"
+  - hashCode()      a number made from the 4 values (see Part 6)
+  - toString()      nice printing: FileMetrics[relativePath=A.java, ...]
+
+All fields are final: once created, a FileMetrics can never change.
+
+The "compact constructor" inside FileMetrics is a guard at the door.
+It runs BEFORE the object is created and throws an error if the data is
+bad (null path, negative line count). A broken FileMetrics can never
+exist.
+
+
+------------------------------------------------------------------------------
+ PART 4 - GENERICS: THE <...> BRACKETS
+------------------------------------------------------------------------------
+
+The angle brackets say WHAT TYPE goes inside a collection.
+
+  List<FileMetrics>          a list that can only hold FileMetrics
+  Set<String>                a set that can only hold Strings
+  Map<String, Set<String>>   a map where
+                               key   = String       (package name)
+                               value = Set<String>  (file paths)
+
+Read Map<String, Set<String>> as:
+  "a map FROM a package name TO a set of file paths".
+
+Example of what it holds:
+  "dev.codepulse"        -> { "Phase0Main.java" }
+  "dev.codepulse.engine" -> { "FileMetrics.java", "PackageSummary.java" }
+
+Why bother? If you try to put a number into a List<FileMetrics>, the
+compiler refuses BEFORE the program runs. Errors caught early are cheap.
+
+
+------------------------------------------------------------------------------
+ PART 5 - SORTED AND "SAME EVERY TIME" (DETERMINISTIC)
+------------------------------------------------------------------------------
+
+  HashMap / HashSet  = fast, but the order you get back is unpredictable.
+  TreeMap / TreeSet  = always keeps things in sorted (A to Z) order.
+
+CodePulse must print the SAME report for the SAME code every time.
+So PackageSummary uses TreeMap and TreeSet. That is why the output is
+always alphabetical, whatever order we put the files in.
+
+
+------------------------------------------------------------------------------
+ PART 6 - EQUALS, HASHCODE, AND THE "LOST KEY" PROBLEM  (gate question)
+------------------------------------------------------------------------------
+
+Two ways to compare objects:
+
+  a == b         "Are these the SAME object in memory?"  (same house?)
+  a.equals(b)    "Do these have the SAME content?"       (same design?)
+
+Always use .equals() for Strings and records. Using == is a classic bug.
+
+How a HashSet finds things - a locker room picture:
+  - hashCode() is a number that decides WHICH LOCKER the object goes in.
+  - equals() checks the objects INSIDE that locker to find the match.
+
+  Adding "A.java":  hashCode says locker 7  -> stored in locker 7.
+  Looking it up:    hashCode says locker 7  -> open 7 -> found it!
+
+Now the danger. Suppose the object can change (it is "mutable"):
+
+  1. Add key with path "A.java"     -> goes into locker 7.
+  2. Change its path to "B.java"    -> object is STILL sitting in locker 7.
+  3. Ask: does the set contain it?  hashCode("B.java") says locker 3.
+                                    Open locker 3 -> empty -> "NO".
+  4. Try to remove it               -> also looks in locker 3 -> fails.
+  5. set.size() still says 1        -> it is there, but lost forever.
+
+That is exactly what CollectionEqualityTest proves.
+
+Lesson: anything you put in a Set, or use as a Map key, must NOT change.
+That is why FileMetrics is a record, and why in Phase 3 the import-graph
+edges will also be records.
+
+
+------------------------------------------------------------------------------
+ PART 7 - DEFENSIVE COPY
+------------------------------------------------------------------------------
+
+Problem: someone hands you a list, keeps a reference to it, and changes
+it later. Your object's data changes behind your back.
+
+Fix: make your OWN copy when you receive it.
+
+  this.metrics = List.copyOf(metrics);
+
+Picture: a friend lends you their notebook. Instead of keeping THEIR
+notebook (which they may scribble in later), you photocopy it and keep
+the photocopy. List.copyOf also makes the copy read-only.
+
+Test that proves it:
+  PackageSummaryTest.isNotAffectedByLaterChangesToTheInputList
+
+
+------------------------------------------------------------------------------
+ PART 8 - EXCEPTIONS AND READING A STACK TRACE
+------------------------------------------------------------------------------
+
+An exception is Java's way of shouting "something went wrong, I cannot
+continue". If nobody catches it, the program stops and prints a
+STACK TRACE.
+
+Run:  java -cp target/classes dev.codepulse.Phase0Main --duplicate
+
+You get:
+
+  Exception in thread "main" java.lang.IllegalArgumentException:
+        duplicate relativePath: src/main/java/App.java
+    at ...PackageSummary.rejectDuplicatePaths(PackageSummary.java:37)
+    at ...PackageSummary.<init>(PackageSummary.java:29)
+    at ...Phase0Main.failWithDuplicatePath(Phase0Main.java:42)
+    at ...Phase0Main.main(Phase0Main.java:16)
+
+How to read it:
+  First line    WHAT went wrong (type + message).
+  "at" lines    WHERE, newest first. A trail of footprints:
+                main (line 16) called failWithDuplicatePath (line 42),
+                which called the constructor <init> (line 29),
+                which called rejectDuplicatePaths (line 37) <- failed here.
+  <init>        is Java's internal name for a constructor.
+
+Tip: find the TOP "at" line that is in YOUR code, open that line number.
+
+Two kinds of exceptions:
+  Checked   (e.g. IOException) - Java FORCES you to handle or declare it.
+            For things outside your control: file missing, network down.
+  Unchecked (e.g. IllegalArgumentException) - not forced.
+            For programming mistakes, like passing a duplicate path.
+
+
+------------------------------------------------------------------------------
+ PART 9 - THE DEBUGGER (A PAUSE BUTTON FOR YOUR PROGRAM)
+------------------------------------------------------------------------------
+
+A breakpoint pauses the program on a line so you can look inside the
+variables, then move forward one line at a time.
+
+VS Code steps:
+  1. Open backend/src/main/java/dev/codepulse/engine/PackageSummary.java
+  2. Click just LEFT of the line number of
+         if (!seen.add(m.relativePath())) {
+     A red dot appears. That is your breakpoint.
+  3. Open backend/src/main/java/dev/codepulse/Phase0Main.java
+  4. The program needs the word --duplicate. Do this once:
+       Run menu -> Add Configuration... -> choose "Java".
+       In the launch.json that opens, find the entry for Phase0Main
+       and add:   "args": "--duplicate"
+  5. Press F5 (Run -> Start Debugging) and pick that configuration.
+  6. The program pauses on the red dot. Look at the left side panel:
+       VARIABLES  -> expand "seen" (empty the first time) and "m".
+       CALL STACK -> the same 4 footprints as the stack trace.
+  7. Press F5 to continue to the next pause. On the SECOND pause,
+     "seen" already contains "src/main/java/App.java" and "m" has the
+     same path. seen.add(...) returns false, the if is true, and the
+     throw runs. Press F10 (Step Over) to watch it happen line by line.
+
+Command-line version (jdb, comes with the JDK):
+  cd backend
+  jdb -classpath target/classes -sourcepath src/main/java dev.codepulse.Phase0Main --duplicate
+  > stop in dev.codepulse.engine.PackageSummary.rejectDuplicatePaths
+  > run
+  > locals          (show variables)
+  > next            (move one line forward; repeat)
+  > print seen
+  > cont            (continue)
+  > quit
+
+
+==============================================================================
+ HOW TO TEST EVERYTHING, STEP BY STEP  (and what each output means)
+==============================================================================
+
+STEP 1 - Open a terminal in the backend folder
+  cd ~/Desktop/CodePulse/backend
+
+STEP 2 - Run all tests
+  ./mvnw test
+
+  What you should see near the end:
+
+    Running dev.codepulse.engine.CollectionEqualityTest
+    Tests run: 3, Failures: 0, Errors: 0, Skipped: 0
+    Running dev.codepulse.engine.PackageSummaryTest
+    Tests run: 4, Failures: 0, Errors: 0, Skipped: 0
+    Tests run: 7, Failures: 0, Errors: 0, Skipped: 0
+    BUILD SUCCESS
+
+  What it means:
+    Tests run: 7   -> 7 small checks ran.
+    Failures: 0    -> no check found a wrong answer.
+    Errors: 0      -> no check crashed unexpectedly.
+    BUILD SUCCESS  -> compiled fine AND all tests passed.
+
+  If you see BUILD FAILURE: scroll UP to the first line starting with
+  [ERROR]. It names the test and shows expected vs actual values.
+
+  What each test proves:
+    PackageSummaryTest
+      groupsFilesByPackageInSortedOrder -> grouping + A-to-Z sorting works
+      emptyInputProducesEmptySummary    -> no files = empty output, no crash
+      rejectsDuplicateRelativePaths     -> same path twice = error
+      isNotAffectedByLaterChanges...    -> defensive copy works (Part 7)
+    CollectionEqualityTest
+      recordsWithSameValuesAreEqual...  -> records compare by content
+      aClassWithoutEquals...            -> plain class compares by identity
+      mutatingAKeyAfterInsertion...     -> the "lost key" problem (Part 6)
+
+STEP 3 - Run the program normally
+  java -cp target/classes dev.codepulse.Phase0Main
+
+  Output:
+    (default package) (1 files)
+      Scratch.java  loc=8 methods=1
+    dev.codepulse (1 files)
+      src/main/java/dev/codepulse/Phase0Main.java  loc=25 methods=1
+    dev.codepulse.engine (2 files)
+      src/main/java/dev/codepulse/engine/FileMetrics.java  loc=40 methods=0
+      src/main/java/dev/codepulse/engine/PackageSummary.java  loc=95 methods=5
+
+  What it means:
+    Each block is one Java package, followed by the files inside it.
+    loc     = number of lines in that file   (typed by hand for now)
+    methods = number of methods in that file (typed by hand for now)
+    "(default package)" = a file with no "package" line at the top.
+
+  Why it is useful:
+    In Phase0Main the files are listed OUT of order on purpose, yet the
+    output is sorted. That proves the report is deterministic. This is
+    a tiny preview of the real CodePulse report: later phases will fill
+    these numbers by actually reading Java source code.
+
+STEP 4 - Run the deliberate crash
+  java -cp target/classes dev.codepulse.Phase0Main --duplicate
+
+  Output: the stack trace shown in Part 8.
+  What it means: our safety check found two files with the same path
+  and refused to continue. That is correct behavior, not a bug.
+  Why it is useful: practice reading stack traces, which you will do
+  many times in this project.
+
+STEP 5 - Run tests inside VS Code (optional, nicer view)
+  Open PackageSummaryTest.java. Click the green triangle next to the
+  class name or next to any @Test method. Green tick = passed,
+  red cross = failed. The "Testing" panel (flask icon on the left bar)
+  lists all 7 tests.
+
+STEP 6 - Break a test on purpose (the best way to learn)
+  In PackageSummaryTest, change
+      List.of("dev.codepulse", "dev.codepulse.engine")
+  to  List.of("dev.codepulse.engine", "dev.codepulse")
+  Run ./mvnw test. You get BUILD FAILURE with something like
+      expected: <[dev.codepulse.engine, dev.codepulse]>
+      but was:  <[dev.codepulse, dev.codepulse.engine]>
+  Read it, change it back, and confirm BUILD SUCCESS again.
+
+
+==============================================================================
+ PHASE 0 GATE - YOU SHOULD BE ABLE TO SAY THESE IN YOUR OWN WORDS
+==============================================================================
+
+  [ ] How .java becomes .class becomes a running program.
+  [ ] What ./mvnw test does, step by step.
+  [ ] What a record gives you for free, and what "final fields" means.
+  [ ] Why changing an object that is inside a HashSet makes it "lost".
+  [ ] Why we copy a list we receive (defensive copy).
+  [ ] How to read a stack trace from top to bottom.
+  [ ] The difference between class, object, interface, and record.
