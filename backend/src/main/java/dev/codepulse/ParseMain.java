@@ -2,6 +2,7 @@ package dev.codepulse;
 
 import com.github.javaparser.printer.YamlPrinter;
 import dev.codepulse.engine.CommentMarkerCounter;
+import dev.codepulse.engine.ComplexityCalculator;
 import dev.codepulse.engine.CommentMarkers;
 import dev.codepulse.engine.DeclarationCounter;
 import dev.codepulse.engine.DeclarationCounts;
@@ -16,6 +17,7 @@ import dev.codepulse.engine.ParseOutcome;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 /**
  * Developer-only harness: parse ONE trusted local .java file and print the outcome.
@@ -54,11 +56,13 @@ public final class ParseMain {
                 + ", blank " + lines.blankLines());
             CommentMarkers markers = CommentMarkerCounter.count(tree);
             System.out.println("markers: TODO " + markers.todoCount() + ", FIXME " + markers.fixmeCount());
-            System.out.println("methods:");
-            for (MethodMeasurement method : MethodCollector.collect(tree)) {
-                System.out.printf("  lines %d-%d  %s  %s  %s%s  ncloc %d%n",
+            List<MethodMeasurement> methods = MethodCollector.collect(tree);
+            System.out.println("methods: (max complexity " + ComplexityCalculator.maxMethodComplexity(methods) + ")");
+            for (MethodMeasurement method : methods) {
+                String complexity = method.complexity() == null ? "none (no body)" : String.valueOf(method.complexity());
+                System.out.printf("  lines %d-%d  %s  %s  %s  ncloc %d  complexity %s%n",
                     method.beginLine(), method.endLine(), method.ownerLabel(), method.signature(),
-                    method.declarationKind(), method.hasBody() ? "" : " (no body)", method.ncloc());
+                    method.declarationKind(), method.ncloc(), complexity);
             }
         });
 

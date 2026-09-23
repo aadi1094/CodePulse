@@ -123,14 +123,14 @@ public final class MethodCollector extends VoidVisitorAdapter<Void> {
     @Override
     public void visit(MethodDeclaration node, Void arg) {
         add(node, signature(node.getNameAsString(), node.getParameters()),
-            DeclarationKind.METHOD, node.getBody().isPresent());
+            DeclarationKind.METHOD, node.getBody().orElse(null));
         super.visit(node, arg);                // local/anonymous classes inside the body
     }
 
     @Override
     public void visit(ConstructorDeclaration node, Void arg) {
         add(node, signature(node.getNameAsString(), node.getParameters()),
-            DeclarationKind.CONSTRUCTOR, true);
+            DeclarationKind.CONSTRUCTOR, node.getBody());
         super.visit(node, arg);
     }
 
@@ -139,14 +139,16 @@ public final class MethodCollector extends VoidVisitorAdapter<Void> {
         // A compact constructor writes no parameter list; its parameters are the record components.
         RecordDeclaration record = (RecordDeclaration) node.getParentNode().orElseThrow();
         add(node, signature(node.getNameAsString(), record.getParameters()),
-            DeclarationKind.COMPACT_CONSTRUCTOR, true);
+            DeclarationKind.COMPACT_CONSTRUCTOR, node.getBody());
         super.visit(node, arg);
     }
 
-    private void add(Node node, String signature, DeclarationKind kind, boolean hasBody) {
+    /** @param body the body block, or null for an abstract/interface method without one */
+    private void add(Node node, String signature, DeclarationKind kind, Node body) {
         int ncloc = LineMetricsCalculator.codeLinesIn(node.getTokenRange().orElseThrow());
-        methods.add(new MethodMeasurement(owners.peek(), signature, kind, hasBody,
-            beginLine(node), node.getEnd().orElseThrow().line, ncloc));
+        Integer complexity = body == null ? null : ComplexityCalculator.complexityOf(body);
+        methods.add(new MethodMeasurement(owners.peek(), signature, kind, body != null,
+            beginLine(node), node.getEnd().orElseThrow().line, ncloc, complexity));
     }
 
     /**

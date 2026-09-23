@@ -2,7 +2,7 @@ package dev.codepulse.engine;
 
 /**
  * One explicit method or constructor in a parsed file (Blueprint 9.3 and 9.5; {@code method_metric}
- * in the schema, {@code MethodMetric} in the API). Complexity is added in a later slice.
+ * in the schema, {@code MethodMetric} in the API).
  *
  * <p>Identity inside one file is (ownerLabel, signature, beginLine). Overloads such as
  * {@code price(int)} and {@code price(int, int)} have different signatures, so they never overwrite
@@ -19,6 +19,8 @@ package dev.codepulse.engine;
  * @param endLine         last line
  * @param ncloc           distinct lines in the declaration's range touched by code tokens,
  *                        including the signature and braces
+ * @param complexity      CodePulse cyclomatic-style complexity (at least 1) when the declaration has a
+ *                        body; {@code null} when it has none. Never 1 for an abstract method.
  */
 public record MethodMeasurement(
     String ownerLabel,
@@ -27,7 +29,8 @@ public record MethodMeasurement(
     boolean hasBody,
     int beginLine,
     int endLine,
-    int ncloc) {
+    int ncloc,
+    Integer complexity) {
 
     public MethodMeasurement {
         if (ownerLabel == null || ownerLabel.isBlank() || signature == null || signature.isBlank()) {
@@ -44,6 +47,10 @@ public record MethodMeasurement(
         }
         if (ncloc < 0) {
             throw new IllegalArgumentException("ncloc must be >= 0");
+        }
+        // Same rule as the schema CHECK: a body has complexity >= 1, no body has null.
+        if (hasBody ? (complexity == null || complexity < 1) : complexity != null) {
+            throw new IllegalArgumentException("complexity must be >= 1 with a body and null without one");
         }
     }
 }

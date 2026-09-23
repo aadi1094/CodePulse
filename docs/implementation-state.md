@@ -1,7 +1,7 @@
 # Implementation state
 Current phase: 2
-Current slice: 2F — method complexity (in progress).
-Last working commit: d340153 feat(engine): count TODO and FIXME markers inside comment tokens (pushed).
+Current slice: 2G — whole-workspace Java analysis with parse coverage (in progress).
+Last working commit: d448faa feat(engine): record per-method identity, line range, and ncloc (pushed).
 
 ## Implemented and personally verified
 - Slice A (2026-09-23): spec pack moved to `docs/spec/`, links fixed, git initialized on `main`, ignore policy, README. Verified by Claude; developer verification pending.
@@ -70,6 +70,12 @@ Last working commit: d340153 feat(engine): count TODO and FIXME markers inside c
   - `LineMetricsCalculator.isCodeToken` / `codeLinesIn(TokenRange)` shared for method ncloc.
   - `MethodCollectorTest` 6 tests (13 hand-written rows for Declarations.java; count consistency with DeclarationCounter; annotations/javadoc/comments; nested/local owners; reformatting-invariant signature; no methods). `ParseMain` prints methods.
 
+- Phase 2 Slice 2F (2026-09-23), implemented and tests pass, developer verification pending:
+  - `engine/ComplexityCalculator` visitor per body: start 1; +1 IfStmt, ForStmt, ForEachStmt, WhileStmt, DoStmt, CatchClause, ConditionalExpr, BinaryExpr AND/OR, non-default SwitchEntry with labels, SwitchEntry guard. Does not enter LambdaExpr, local type declarations, or anonymous class bodies (visits ObjectCreationExpr scope and arguments only). `maxMethodComplexity(list)` → 0 when no bodies.
+  - `MethodMeasurement.complexity` (Integer; ≥1 with body, null without — mirrors schema CHECK). `MethodCollector` computes it for bodies.
+  - Fixture `fixtures/complexity/Complexity.java`: 20 methods with hand-written "expected N" comments (five-point example, else-if, nested ternary, &&/||, bitwise, grouped switch, old-style switch, guarded pattern case, loops, multi-catch, lambda, anonymous, anonymous with argument, local class, constructor, abstract). `ComplexityCalculatorTest` 4 tests; `MethodCollectorTest` rows updated with complexity.
+  - `ParseMain` prints complexity per method and file max.
+
 ## Commands and observed results
 - 2026-09-23 `java -version` → OpenJDK 21.0.11 (Homebrew). `mvn -version` → Apache Maven 3.9.16. Toolchain ready for Phase 0.
 - 2026-09-23 `git init -b main` → empty repository created; no commits.
@@ -122,7 +128,12 @@ Last working commit: d340153 feat(engine): count TODO and FIXME markers inside c
 - 2026-09-23 `./mvnw -B test` (Slice 2E) → BUILD SUCCESS, `Tests run: 64, Failures: 0, Errors: 0`.
 - 2026-09-23 Mutation check: removed `owners.pop()` in class visitor → Declarations fixture test failed; restored → 64/64.
 
+- 2026-09-23 `git commit` + `git push`: d448faa Slice 2E.
+- 2026-09-23 `./mvnw -B test` (Slice 2F) → BUILD SUCCESS, `Tests run: 68, Failures: 0, Errors: 0`; all 20 fixture expectations matched on first run.
+- 2026-09-23 Mutation checks: enter lambda bodies → `lambda(boolean)` expected 2 was 4; enter anonymous bodies → `anonymous()` expected 1 was 2; count labels not entries → `grouped(String)` expected 3 was 4; restored → 68/68.
+
 ## Known failures or limitations
+- Slice 2F: lambda complexity is not scored (Blueprint 9.4 MVP limitation; lambdas are only counted). Initializer blocks and field initializers are outside the metric. `case null, default ->` is treated as a default entry (adds 0); not separately tested.
 - Slice 2A: parser output is not yet connected to inventory (no per-file PARSED/PARSE_FAILED in InventoryResult); strict UTF-8 decoding of analyzed files is not implemented yet (harness uses Files.readString on trusted files). Other Java 21 preview features besides unnamed classes/variables and string templates are not individually tested. All JavaParser problems map to SYNTAX_ERROR, including preview features its validator rejects.
 - Slice 1A: symlinks are skipped without being counted; the spec's workspace rules (Phase 7) reject them at extraction. UTF-8 validity is not checked in inventory (deferred to parsing, Phase 2). The 256 KiB cap applies only to .java files; the Blueprint's archive-level caps arrive with acquisition in Phase 7.
 - Slice 1A walks into excluded directories and counts their files instead of skipping the subtree; fine for bounded workspaces, revisit if scans get slow.
@@ -175,6 +186,10 @@ Last working commit: d340153 feat(engine): count TODO and FIXME markers inside c
 
 - 2026-09-23 Slice 2E answers: Q1 overloads would overwrite each other — correct. Q2 missing pop → "not get the data" — vague; correct answer: old owner stays on the stack so later methods get wrong owner labels. Q3 `#` = local class inside a method — correct (not importable). Bank prediction skipped at developer's request ("commit and continue"); Q2 re-explained with a two-class stack trace.
 
+- 2026-09-23 Slice 2F answers: Q1 grouped case adds 1 "because of the new style" — partial (one entry = one branch, however many labels). Q2 abstract → null "because every method is abstract" — not understood; re-taught (no body = nothing to measure; 1 would claim a path exists). Q3 and the `ship` prediction (actual 7, verified) not answered; walked through step by step, smaller practice `small(int, boolean)` (actual 3) given.
+
+- 2026-09-23 Complexity practice: `small` answered 2 (actual 3, missed the ternary); re-taught with a symbol checklist; lambda-as-separate-unit re-taught with a deferred Runnable example. `ok(int, boolean)` answered 3 — correct (1 + if + &&).
+
 ## Current learning gate (Phase 1, passed 2026-09-23)
 - Developer must explain: what inventory counts vs what Java analysis does; why Files.walk is closed (try-with-resources, OS handles, even on exception); how paths are normalized and exclusions applied; when to use a checked exception.
 
@@ -206,7 +221,7 @@ Last working commit: d340153 feat(engine): count TODO and FIXME markers inside c
   - Gate status: MET for the concept questions on 2026-09-23. Failures vs Errors was corrected in teaching; revisit briefly in Phase 1 when the first test fails.
 
 ## Next smallest slice
-- Slice 2F: CodePulse cyclomatic-style complexity per executable (Blueprint 9.4): start 1; +1 for if, for, foreach, while, do, catch, ternary, &&, ||, each non-default switch entry with labels (grouped labels = one), guard as one decision; skip nested type bodies and lambda bodies; abstract → null. Five-point example first; fixtures for grouped switch, nested ternary, multi-catch, else-if, lambdas. Then maxMethodComplexity per file.
+- Slice 2G (last Phase 2 slice): analyze a whole workspace — for each Java file from SourceInventory: strict UTF-8 decode (invalid → PARSE_FAILED with an encoding code), parse, and when PARSED collect packageName, declaration counts, line metrics, markers, methods, maxMethodComplexity into one immutable per-file result; failed files keep null metrics. Parse coverage = parsed / eligible. Then the Phase 2 gate: developer predicts a new ~20-line fixture by hand.
 
 ## Suggested commit
 - None pending.

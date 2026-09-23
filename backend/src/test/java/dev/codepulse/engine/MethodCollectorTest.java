@@ -20,21 +20,21 @@ class MethodCollectorTest {
 
     @Test
     void everyMethodAndConstructorInTheDeclarationsFixture() throws IOException {
-        // owner, signature, kind, hasBody, begin, end, ncloc
+        // owner, signature, kind, hasBody, begin, end, ncloc, complexity
         List<MethodMeasurement> expected = List.of(
-            m("Greeter", "greet(String)", METHOD, false, 13, 13, 1),
-            m("Greeter", "greet()", METHOD, true, 15, 17, 3),
-            m("Greeter", "polite()", METHOD, true, 19, 21, 3),
-            m("Shop", "Shop()", CONSTRUCTOR, true, 27, 29, 3),
-            m("Shop", "Shop(int)", CONSTRUCTOR, true, 31, 33, 3),
-            m("Shop", "price(int)", METHOD, true, 35, 37, 3),
-            m("Shop", "price(int, int)", METHOD, true, 39, 41, 3),      // overload kept separate
-            m("Shop", "task()", METHOD, true, 43, 53, 11),              // includes the local/anonymous code
-            m("Shop#Local", "run()", METHOD, true, 45, 46, 2),          // local class: "#"
-            m("Shop#anonymous@48", "run()", METHOD, true, 49, 51, 3),   // anonymous class started on line 48
-            m("Shop.Size#SMALL", "weight()", METHOD, true, 57, 59, 3),  // enum constant body
-            m("Shop.Size", "weight()", METHOD, false, 62, 62, 1),       // member type: "."
-            m("Shop.Item", "Item(String, int)", COMPACT_CONSTRUCTOR, true, 66, 70, 5));
+            m("Greeter", "greet(String)", METHOD, false, 13, 13, 1, null),
+            m("Greeter", "greet()", METHOD, true, 15, 17, 3, 1),
+            m("Greeter", "polite()", METHOD, true, 19, 21, 3, 1),
+            m("Shop", "Shop()", CONSTRUCTOR, true, 27, 29, 3, 1),
+            m("Shop", "Shop(int)", CONSTRUCTOR, true, 31, 33, 3, 1),
+            m("Shop", "price(int)", METHOD, true, 35, 37, 3, 1),
+            m("Shop", "price(int, int)", METHOD, true, 39, 41, 3, 1),      // overload kept separate
+            m("Shop", "task()", METHOD, true, 43, 53, 11, 1),              // includes the local/anonymous code
+            m("Shop#Local", "run()", METHOD, true, 45, 46, 2, 1),          // local class: "#"
+            m("Shop#anonymous@48", "run()", METHOD, true, 49, 51, 3, 1),   // anonymous class started on line 48
+            m("Shop.Size#SMALL", "weight()", METHOD, true, 57, 59, 3, 1),  // enum constant body
+            m("Shop.Size", "weight()", METHOD, false, 62, 62, 1, null),       // member type: "."
+            m("Shop.Item", "Item(String, int)", COMPACT_CONSTRUCTOR, true, 66, 70, 5, 2));
 
         assertEquals(expected, MethodCollector.collect(tree(fixture("Declarations.java"))));
     }
@@ -62,9 +62,9 @@ class MethodCollectorTest {
             """;
         // format: lines 3-7; code lines 3,4,6,7 = 4. names: line 8 only.
         assertEquals(List.of(
-                m("Fmt", "format(String, Object...)", METHOD, true, 3, 7, 4),
+                m("Fmt", "format(String, Object...)", METHOD, true, 3, 7, 4, 1),
                 // JavaParser prints types in a normalized form: no space after the comma.
-                m("Fmt", "names(java.util.Map<String,Integer>)", METHOD, true, 8, 8, 1)),
+                m("Fmt", "names(java.util.Map<String,Integer>)", METHOD, true, 8, 8, 1, 1)),
             MethodCollector.collect(tree(source)));
     }
 
@@ -92,8 +92,8 @@ class MethodCollectorTest {
             }
             """;
         assertEquals(List.of(
-                m("A.B", "m()", METHOD, true, 3, 7, 5),
-                m("A.B#R", "twice()", METHOD, true, 5, 5, 1)),
+                m("A.B", "m()", METHOD, true, 3, 7, 5, 1),
+                m("A.B#R", "twice()", METHOD, true, 5, 5, 1, 1)),
             MethodCollector.collect(tree(source)));
     }
 
@@ -103,8 +103,8 @@ class MethodCollectorTest {
     }
 
     private static MethodMeasurement m(String owner, String signature, DeclarationKind kind,
-                                       boolean hasBody, int begin, int end, int ncloc) {
-        return new MethodMeasurement(owner, signature, kind, hasBody, begin, end, ncloc);
+                                       boolean hasBody, int begin, int end, int ncloc, Integer complexity) {
+        return new MethodMeasurement(owner, signature, kind, hasBody, begin, end, ncloc, complexity);
     }
 
     private com.github.javaparser.ast.CompilationUnit tree(String source) {
