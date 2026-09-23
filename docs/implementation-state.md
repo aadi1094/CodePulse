@@ -1,7 +1,7 @@
 # Implementation state
 Current phase: 1
-Current slice: 1A — SourceInventory walks a trusted folder, skips excluded directories (counted), ignores symlinks, returns sorted POSIX relative paths with byte sizes. Implemented, tests pass, uncommitted; developer verification pending.
-Last working commit: 1c141fd feat(engine): add equality, defensive-copy, and debugger practice for Phase 0 (Slice C).
+Current slice: 1B — physical line counts for .java files with a 256 KiB bounded read. Implemented, 30 tests pass, uncommitted; developer verification pending.
+Last working commit: 2403fcf feat(engine): add source inventory with exclusions and sorted relative paths (Slice 1A, pushed to origin/main).
 
 ## Implemented and personally verified
 - Slice A (2026-09-23): spec pack moved to `docs/spec/`, links fixed, git initialized on `main`, ignore policy, README. Verified by Claude; developer verification pending.
@@ -26,6 +26,12 @@ Last working commit: 1c141fd feat(engine): add equality, defensive-copy, and deb
   - `SourceInventoryTest` (8 tests, @TempDir fixtures): empty, nested + sorted, byte sizes incl. CRLF, exclusions counted, exact-name matching, symlinks not followed, missing root, file as root.
   - `docs/learning/phase-1-source-inventory.notes`.
 
+- Phase 1 Slice 1B (2026-09-23), implemented and tests pass, developer verification pending:
+  - `engine/PhysicalLineCounter`: byte-level physicalLoc (empty 0, trailing break adds nothing, \r\n / \n / lone \r = one break), 8 KiB buffer, CR state carried across buffers, stops once more than maxBytes are read.
+  - `engine/FileSizeLimitExceededException` (checked, extends IOException) with relativePath and limitBytes.
+  - `SourceFile.physicalLines` (Integer, null = not measured for non-.java files). `SourceInventory` takes `maxJavaFileBytes` (default 256 KiB), checks Files.size first, then the counter enforces it on bytes read.
+  - Tests: `PhysicalLineCounterTest` 11 hand-counted cases (incl. CRLF split at buffer boundary, UTF-8 multibyte, limit); `SourceInventoryTest` +4 (Java-only counting, at-limit accepted, over-limit stops scan, large non-Java not limited).
+
 ## Commands and observed results
 - 2026-09-23 `java -version` → OpenJDK 21.0.11 (Homebrew). `mvn -version` → Apache Maven 3.9.16. Toolchain ready for Phase 0.
 - 2026-09-23 `git init -b main` → empty repository created; no commits.
@@ -43,8 +49,12 @@ Last working commit: 1c141fd feat(engine): add equality, defensive-copy, and deb
 - 2026-09-23 `./mvnw -B test` (Slice 1A) → BUILD SUCCESS, `Tests run: 15, Failures: 0, Errors: 0, Skipped: 0` (SourceInventoryTest 8/8).
 - 2026-09-23 `java -cp target/classes dev.codepulse.InventoryMain .` (in backend/) → 14 included files listed sorted, `excluded files: 22` (target/ contents).
 
+- 2026-09-23 `./mvnw -B test` (Slice 1B, first run) → BUILD FAILURE, 2 failures: `expected: <22> but was: <21>` (UTF-8 text length) and `sizeBytes=13 ... but was 14` (App.java). Hypothesis: hand-counted expectations wrong, code right. Evidence: Python count gave 14 bytes and 21 chars / 26 bytes. Fixed expectations (also the unreached 27→26).
+- 2026-09-23 `./mvnw -B test` (Slice 1B, after fix) → BUILD SUCCESS, `Tests run: 30, Failures: 0, Errors: 0, Skipped: 0`.
+- 2026-09-23 `InventoryMain .` line counts match `wc -l` for SourceInventory.java (145), PhysicalLineCounter.java (72), Phase0Main.java (44).
+
 ## Known failures or limitations
-- Slice 1A: symlinks are skipped without being counted; the spec's workspace rules (Phase 7) reject them at extraction. Line counts, size cap, MAIN/TEST/OTHER classification, and the workspace interface are not implemented yet (Slices 1B/1C).
+- Slice 1A: symlinks are skipped without being counted; the spec's workspace rules (Phase 7) reject them at extraction. MAIN/TEST/OTHER classification and the workspace interface are not implemented yet (Slice 1C). UTF-8 validity is not checked in inventory (deferred to parsing, Phase 2). The 256 KiB cap applies only to .java files; the Blueprint's archive-level caps arrive with acquisition in Phase 7.
 - Slice 1A walks into excluded directories and counts their files instead of skipping the subtree; fine for bounded workspaces, revisit if scans get slow.
 - No application code exists. Nothing in this repository runs yet.
 - Deferred by design until their phase: Spring Boot (4), PostgreSQL/JPA/Flyway (5), sessions/CSRF (6), GitHub acquisition (7), worker (8), React (9), Docker/CI (10).
@@ -64,10 +74,20 @@ Last working commit: 1c141fd feat(engine): add equality, defensive-copy, and deb
 - 2026-09-23 Learning notes use plain-text `.notes` files in `docs/learning/` (developer preference) instead of Markdown.
 
 - 2026-09-23 Default excluded directory names: `.git, node_modules, vendor, target, build, generated, generated-sources`. Blueprint 9.2 says "generated-source directories" without naming them; `generated` and `generated-sources` are my concrete choice. Matching is exact and case-sensitive on directory segments only.
+- 2026-09-23 physicalLoc counted on raw bytes (not decoded chars) and only for `.java` files; non-Java files get `null` (not measured), never 0. Lone `\r` counts as a line break, following JLS 3.4 line terminators (Blueprint 9.3 only states CRLF normalization).
+- 2026-09-23 Size-limit violation throws checked `FileSizeLimitExceededException` and fails the whole scan (Blueprint 11.3 "reject run"), not a per-file skip.
 - 2026-09-23 Inventory uses `Files.walk` + try-with-resources (teaches resource closing, the Phase 1 gate). Alternative `Files.walkFileTree` with SKIP_SUBTREE avoids descending into excluded folders; deferred.
 
 ## Current learning gate (Phase 1)
 - Developer must explain: what inventory counts vs what Java analysis does; why Files.walk is closed (try-with-resources, OS handles, even on exception); how paths are normalized and exclusions applied; when to use a checked exception.
+
+- 2026-09-23 first attempt at Slice 1A questions:
+  - Inventory vs analysis: half right (inventory lists folders/files); missing that analysis reads and parses file contents.
+  - Why handles are returned on exception: NOT understood ("OS gets limited time"). Re-taught with a Door AutoCloseable demo (open → work → throw → close runs → catch).
+  - Why relative paths: mixed up with "Path does not touch the disk". Re-taught: same result on every computer, no private laptop path leaked.
+  - Prediction for the 4-file folder: not answered yet.
+  - Second attempt: Q1 correct (lists vs opens). Q2 named try-with-resources; corrected that it calls close(). Q3 and the 4-file prediction left unanswered; developer said "I got the topic" and asked to continue with 1B. Recorded as the developer's decision; revisit Q3 at the Phase 1 checkpoint.
+  - Gate status: partially met; proceeding at developer's request.
 
 ## Current learning gate (Phase 0, passed)
 - Developer must: run `./mvnw test` themselves; reproduce the breakpoint in VS Code (steps in `docs/learning/phase-0-java-bridge.notes`); explain source → bytecode → execution; explain why mutating a HashSet key is dangerous; answer the Slice B prediction and the understanding questions. Not yet done as of 2026-09-23.
@@ -80,8 +100,8 @@ Last working commit: 1c141fd feat(engine): add equality, defensive-copy, and deb
   - Gate status: MET for the concept questions on 2026-09-23. Failures vs Errors was corrected in teaching; revisit briefly in Phase 1 when the first test fails.
 
 ## Next smallest slice
-- Slice 1B: physical line count per file with a bounded read (256 KiB single-file cap from Blueprint 11.3), UTF-8, CRLF normalized, trailing newline does not add a line (Blueprint 9.3 physicalLoc).
+- Slice 1C: classify each file (MAIN for src/main/**, TEST for src/test/**, OTHER_SOURCE otherwise; Java candidates vs other files) as an enum, add counts, and introduce the `SourceWorkspace` interface so Phase 7 can supply a downloaded workspace without changing inventory.
 
 ## Suggested commit
-- `feat(engine): add source inventory with exclusions and sorted relative paths`
+- `feat(engine): count physical lines with bounded reads and size limit`
 

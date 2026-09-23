@@ -24,6 +24,7 @@ import java.util.stream.Stream;
  *   <li>Output is sorted, because the filesystem returns files in no guaranteed order.</li>
  *   <li>Symbolic links are never followed and never listed.</li>
  *   <li>Files inside an excluded directory are counted, not silently dropped.</li>
+ *   <li>{@code .java} files get a physical line count; a file above the size limit stops the scan.</li>
  * </ul>
  */
 public final class SourceInventory {
@@ -35,14 +36,23 @@ public final class SourceInventory {
     public static final Set<String> DEFAULT_EXCLUDED_DIRECTORIES =
         Set.of(".git", "node_modules", "vendor", "target", "build", "generated", "generated-sources");
 
+    /** Largest .java file we will read: 256 KiB (Blueprint 11.3). */
+    public static final long DEFAULT_MAX_JAVA_FILE_BYTES = 256 * 1024;
+
     private final Set<String> excludedDirectoryNames;
+    private final long maxJavaFileBytes;
+    private final PhysicalLineCounter lineCounter = new PhysicalLineCounter();
 
     public SourceInventory() {
-        this(DEFAULT_EXCLUDED_DIRECTORIES);
+        this(DEFAULT_EXCLUDED_DIRECTORIES, DEFAULT_MAX_JAVA_FILE_BYTES);
     }
 
-    public SourceInventory(Set<String> excludedDirectoryNames) {
+    public SourceInventory(Set<String> excludedDirectoryNames, long maxJavaFileBytes) {
+        if (maxJavaFileBytes <= 0) {
+            throw new IllegalArgumentException("maxJavaFileBytes must be > 0");
+        }
         this.excludedDirectoryNames = Set.copyOf(excludedDirectoryNames);
+        this.maxJavaFileBytes = maxJavaFileBytes;
     }
 
     /**
@@ -50,6 +60,7 @@ public final class SourceInventory {
      * @return included files sorted by relative path, plus the count of excluded files
      * @throws NoSuchFileException   if root does not exist
      * @throws NotDirectoryException if root is a file or a symbolic link
+     * @throws FileSizeLimitExceededException if a .java file is larger than the limit
      * @throws IOException           if the filesystem cannot be read
      */
     public InventoryResult scan(Path root) throws IOException {
@@ -83,7 +94,7 @@ public final class SourceInventory {
                     excluded++;
                     continue;
                 }
-                files.add(new SourceFile(toPosixPath(relative), Files.size(path)));
+                files.add(measure(path, toPosixPath(relative)));
             }
         } catch (UncheckedIOException e) {
             // The stream's iterator cannot throw checked exceptions, so it wraps them.
@@ -93,6 +104,20 @@ public final class SourceInventory {
 
         files.sort(Comparator.comparing(SourceFile::relativePath));
         return new InventoryResult(files, excluded);
+    }
+
+    private SourceFile measure(Path path, String relativePath) throws IOException {
+        long size = Files.size(path);
+        if (!relativePath.endsWith(".java")) {
+            return new SourceFile(relativePath, size, null);   // not measured
+        }
+        // Cheap early check using the size the filesystem reports ...
+        if (size > maxJavaFileBytes) {
+            throw new FileSizeLimitExceededException(relativePath, maxJavaFileBytes);
+        }
+        // ... and the counter enforces the limit again on the bytes it actually reads.
+        int lines = lineCounter.count(path, relativePath, maxJavaFileBytes);
+        return new SourceFile(relativePath, size, lines);
     }
 
     /** True if any directory segment (not the file name itself) is an excluded name. */

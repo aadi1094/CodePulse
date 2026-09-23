@@ -14,7 +14,7 @@ Why a separate step?
 
 Slices:
   1A  Walk a folder, skip junk folders, sorted list with sizes   <- DONE
-  1B  Count lines safely (size cap, Windows line endings)
+  1B  Count lines safely (size cap, Windows line endings)     <- DONE
   1C  Label files MAIN / TEST / OTHER, add the workspace interface
 
 
@@ -136,3 +136,99 @@ What each test proves:
   doesNotFollowOrListSymbolicLinks              shortcuts ignored (security)
   rejectsMissingRoot                            missing folder = clear error
   rejectsRootThatIsAFile                        a file is not a folder
+
+
+==============================================================================
+ SLICE 1B - COUNTING LINES SAFELY
+==============================================================================
+
+What it does:
+  For every .java file, count its lines. Other files (README, pom.xml,
+  images) are NOT counted; their line count is null.
+
+The rules (Blueprint 9.3, "physicalLoc"):
+  ""                  -> 0 lines   (empty file)
+  "class A {}"        -> 1 line
+  "class A {}\n"      -> 1 line   (a final newline does NOT add a line)
+  "a\n\nb\n"          -> 3 lines  (the empty middle line still counts)
+  "a\r\nb\r\n"        -> 2 lines  (Windows \r\n = ONE line break)
+  "a\rb"              -> 2 lines  (old-Mac \r alone = one line break)
+
+Line endings, in one picture:
+  Mac/Linux  ends a line with   \n       (1 byte)
+  Windows    ends a line with   \r\n     (2 bytes)
+  If we counted every \r and every \n, Windows files would look twice
+  as long. So when \n comes right after \r, we don't count it again.
+
+NEW IDEA 1 - null means "not measured", 0 means "measured and empty".
+  SourceFile.physicalLines is an Integer (can be null), not an int.
+  README.md -> null  (we did not look)
+  Empty.java -> 0    (we looked, it is empty)
+  Writing 0 for README would be a lie. CodePulse never fakes a number.
+
+NEW IDEA 2 - bounded reading (never trust a file's size).
+  A .java file bigger than 256 KiB stops the whole scan with
+  FileSizeLimitExceededException. We check twice:
+    a) Files.size() first - cheap, catches most big files.
+    b) While reading, we stop the moment we pass the limit.
+  Why twice? A file can grow between (a) and (b). Untrusted input must
+  never make us read an unlimited amount of data.
+
+NEW IDEA 3 - reading in chunks (buffer).
+  We read 8192 bytes at a time, not the whole file at once. Tricky case:
+  the \r lands at the END of one chunk and the \n at the START of the
+  next. A flag (previousWasCarriageReturn) remembers the \r across
+  chunks. Test: crlfSplitAcrossTheReadBufferIsStillOneLineBreak.
+
+NEW IDEA 4 - bytes vs characters (UTF-8).
+  "é" is 1 character but 2 bytes. "日" is 1 character but 3 bytes.
+  sizeBytes counts BYTES. Line counting also works on bytes, which is
+  safe because the bytes for \n and \r never appear inside a
+  multi-byte character.
+
+NEW IDEA 5 - our own exception class.
+  FileSizeLimitExceededException extends IOException (checked), because
+  it is about the INPUT, not a bug in our code, and the caller must
+  decide how to report it. It carries the path and the limit.
+
+
+------------------------------------------------------------------------------
+ DEBUGGING LESSON FROM SLICE 1B (real, 2026-09-23)
+------------------------------------------------------------------------------
+
+First run: 2 tests FAILED.
+  expected: <22> but was: <21>
+  ... sizeBytes=13 ... but was ... sizeBytes=14 ...
+
+Hypothesis: the code is right; the hand-counted EXPECTED values in the
+tests were wrong (every line-count check had passed; only sizes failed).
+Evidence: counted the same strings independently with Python:
+  "class App {\n}\n" = 14 bytes,  UTF-8 text = 21 chars / 26 bytes.
+Fix: corrected the expected numbers, wrote the counting in comments.
+
+Lesson: when a test fails, first ask "is the code wrong, or is the
+TEST wrong?" Find evidence OUTSIDE the code before changing anything.
+Never just copy whatever the code printed into the test - then the
+test proves nothing.
+
+
+------------------------------------------------------------------------------
+ HOW TO TEST SLICE 1B
+------------------------------------------------------------------------------
+
+STEP 1  cd ~/Desktop/CodePulse/backend
+STEP 2  ./mvnw test
+        Expect: Tests run: 30, Failures: 0, Errors: 0   BUILD SUCCESS
+        New: PhysicalLineCounterTest (11), SourceInventoryTest now 12.
+
+STEP 3  java -cp target/classes dev.codepulse.InventoryMain .
+        Now each line looks like:
+          pom.xml  2294 bytes  lines not measured
+          src/main/java/dev/codepulse/Phase0Main.java  1807 bytes  44 lines
+        The .java files get a line count; everything else says
+        "lines not measured".
+
+STEP 4  Compare with the Mac's own line counter:
+          wc -l src/main/java/dev/codepulse/Phase0Main.java
+        It also says 44. (wc -l counts \n characters, so it only agrees
+        when the file ends with a newline - ours all do.)

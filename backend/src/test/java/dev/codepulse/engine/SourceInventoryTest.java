@@ -58,9 +58,9 @@ class SourceInventoryTest {
         InventoryResult result = inventory.scan(root);
 
         assertEquals(List.of(
-            new SourceFile("crlf.txt", 6),
-            new SourceFile("empty.txt", 0),
-            new SourceFile("five.txt", 5)), result.files());
+            new SourceFile("crlf.txt", 6, null),
+            new SourceFile("empty.txt", 0, null),
+            new SourceFile("five.txt", 5, null)), result.files());
     }
 
     @Test
@@ -100,6 +100,52 @@ class SourceInventoryTest {
         InventoryResult result = inventory.scan(root);
 
         assertEquals(List.of("real.txt"), paths(result));
+    }
+
+    @Test
+    void countsLinesForJavaFilesOnly() throws IOException {
+        // "class App {" is 11 bytes, "\n" 1, "}" 1, "\n" 1 -> 14 bytes, 2 lines
+        write("src/App.java", "class App {\n}\n");
+        write("README.md", "line one\nline two\n");
+
+        InventoryResult result = inventory.scan(root);
+
+        assertEquals(List.of(
+            new SourceFile("README.md", 18, null),     // not measured: null, not 0
+            new SourceFile("src/App.java", 14, 2)), result.files());
+    }
+
+    @Test
+    void javaFileExactlyAtTheLimitIsAccepted() throws IOException {
+        write("A.java", "0123456789");                  // exactly 10 bytes
+        SourceInventory tenByteLimit = new SourceInventory(SourceInventory.DEFAULT_EXCLUDED_DIRECTORIES, 10);
+
+        InventoryResult result = tenByteLimit.scan(root);
+
+        assertEquals(List.of(new SourceFile("A.java", 10, 1)), result.files());
+    }
+
+    @Test
+    void javaFileOverTheLimitStopsTheScan() throws IOException {
+        write("Big.java", "0123456789X");                // 11 bytes
+        write("Small.java", "class S {}");
+        SourceInventory tenByteLimit = new SourceInventory(SourceInventory.DEFAULT_EXCLUDED_DIRECTORIES, 10);
+
+        FileSizeLimitExceededException ex =
+            assertThrows(FileSizeLimitExceededException.class, () -> tenByteLimit.scan(root));
+
+        assertEquals("Big.java", ex.relativePath());
+        assertEquals(10, ex.limitBytes());
+    }
+
+    @Test
+    void largeNonJavaFilesAreNotLimited() throws IOException {
+        write("image.png", "x".repeat(50));             // bigger than the limit, but not Java
+        SourceInventory tenByteLimit = new SourceInventory(SourceInventory.DEFAULT_EXCLUDED_DIRECTORIES, 10);
+
+        InventoryResult result = tenByteLimit.scan(root);
+
+        assertEquals(List.of(new SourceFile("image.png", 50, null)), result.files());
     }
 
     @Test

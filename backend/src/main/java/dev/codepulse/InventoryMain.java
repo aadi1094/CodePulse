@@ -22,7 +22,8 @@ public final class InventoryMain {
         }
         InventoryResult result = new SourceInventory().scan(Path.of(args[0]));
         for (SourceFile file : result.files()) {
-            System.out.println(file.relativePath() + "  " + file.sizeBytes() + " bytes");
+            String lines = file.isMeasured() ? file.physicalLines() + " lines" : "lines not measured";
+            System.out.println(file.relativePath() + "  " + file.sizeBytes() + " bytes  " + lines);
         }
         System.out.println("included files: " + result.files().size());
         System.out.println("excluded files: " + result.excludedFileCount());
