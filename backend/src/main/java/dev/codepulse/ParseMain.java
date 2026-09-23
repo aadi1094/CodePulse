@@ -1,6 +1,8 @@
 package dev.codepulse;
 
 import com.github.javaparser.printer.YamlPrinter;
+import dev.codepulse.engine.DeclarationCounter;
+import dev.codepulse.engine.DeclarationCounts;
 import dev.codepulse.engine.JavaSourceParser;
 import dev.codepulse.engine.ParseDiagnostic;
 import dev.codepulse.engine.ParseOutcome;
@@ -34,6 +36,15 @@ public final class ParseMain {
                 System.out.println("  " + d.code() + " at " + where);
             }
         }
+        outcome.syntaxTree().ifPresent(tree -> {
+            DeclarationCounts c = DeclarationCounter.countIn(tree);
+            System.out.println("types:   class " + c.classCount() + ", interface " + c.interfaceCount()
+                + ", enum " + c.enumCount() + ", record " + c.recordCount()
+                + ", annotation " + c.annotationCount() + ", anonymous " + c.anonymousClassCount());
+            System.out.println("members: method " + c.methodCount() + ", constructor " + c.constructorCount()
+                + ", executable " + c.executableCount() + ", lambda " + c.lambdaCount());
+        });
+
         boolean showTree = args.length > 1 && args[1].equals("--tree");
         if (showTree) {
             outcome.syntaxTree().ifPresentOrElse(

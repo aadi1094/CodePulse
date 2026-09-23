@@ -9,7 +9,7 @@ Goal of Phase 2:
 
 Slices (from the playbook):
   2A  Parse one file: PARSED or PARSE_FAILED                   <- DONE
-  2B  Find declarations: classes, interfaces, records, methods...
+  2B  Find declarations: classes, interfaces, records, methods...  <- DONE
   2C  Token-based source lines (ncloc) and comment lines
   2D  Comments: TODO / FIXME markers
   2E  Method line ranges
@@ -176,3 +176,121 @@ STEP 6  SEE A TREE (best learning step):
         ClassOrInterfaceDeclaration (isInterface: "true"),
         MethodDeclaration with name "root".
         Try it on Phase0Main.java too, and find the IfStmt.
+
+
+==============================================================================
+ SLICE 2B - COUNTING DECLARATIONS WITH A VISITOR
+==============================================================================
+
+What it does:
+  For a PARSED file, count what is written in it:
+    class, interface, enum, record, annotation, anonymous class,
+    method, constructor, executable, lambda
+  A broken (PARSE_FAILED) file gets NO counts at all.
+
+------------------------------------------------------------------------------
+ BIG IDEA - THE VISITOR (a tour guide walking the tree)
+------------------------------------------------------------------------------
+
+The tree can be deep: a class inside a class inside a method...
+We need to visit EVERY node exactly once.
+
+JavaParser gives us VoidVisitorAdapter: a tour guide that already
+knows how to walk every room (node) and every room inside it.
+We only say what to do in the rooms we care about:
+
+    @Override
+    public void visit(MethodDeclaration node, Void arg) {
+        methodCount++;                 // 1. do our job in this room
+        super.visit(node, arg);        // 2. "guide, continue into the rooms inside"
+    }
+
+RECURSION: the guide enters a room, and for each room inside it,
+does the same thing again. That is why nested classes work with no
+extra code from us.
+
+THE CLASSIC BUG - forgetting super.visit(...)
+  Without it, the guide stops at that room and never goes inside.
+  We TRIED this on purpose (real experiment):
+    removed super.visit in the class visitor ->
+    expected method 10 ... but was method 0
+    3 tests failed. Then we put the line back: 45/45 pass.
+  So our tests would catch this bug if anyone made it.
+
+------------------------------------------------------------------------------
+ BIG IDEA - EXPLICIT vs IMPLICIT
+------------------------------------------------------------------------------
+
+Java secretly writes some code for you ("implicit"):
+    record Point(int x, int y) {}   -> constructor, x(), y(), equals...
+    enum Color { RED, GREEN }       -> values(), valueOf()
+    class Empty {}                  -> a default constructor
+
+CodePulse counts only what the PROGRAMMER WROTE ("explicit").
+For the three lines above: methods 0, constructors 0.
+Why? We measure the code people must read and review. Hidden
+generated code is not something a reviewer reads.
+
+------------------------------------------------------------------------------
+ THE COUNTING RULES (Blueprint 9.3), with examples
+------------------------------------------------------------------------------
+
+  class        named classes, INCLUDING nested and local ones
+               NOT interfaces, NOT anonymous "new X() { }"
+  interface    "interface Greeter" (an @interface is NOT an interface here)
+  annotation   "@interface Audit" - its "String value();" is NOT a method
+  anonymous    "new Runnable() { ... }" - counted separately, not a class
+  method       every written method, INCLUDING abstract ones with no body
+  constructor  written constructors, INCLUDING record compact ones: Item { ... }
+  executable   methods and constructors that HAVE A BODY { ... }
+                  "abstract int weight();"   method yes, executable NO
+                  "default String greet() {}" method yes, executable YES
+  lambda       "name -> ..." counted, but NOT an executable
+
+The big fixture (Declarations.java) has a running tally written in
+comments next to each line. Open it and follow along:
+  class 2, interface 1, enum 1, record 1, annotation 1, anonymous 1,
+  method 10, constructor 3, executable 11, lambda 2
+
+------------------------------------------------------------------------------
+ TEST-FIRST (red -> green), real run
+------------------------------------------------------------------------------
+
+1. Wrote the fixture and counted by hand FIRST.
+2. Wrote the tests with those hand numbers.
+3. Ran them against an empty "stub" -> RED: 5 ERRORS.
+   (Errors, not Failures: the stub CRASHED before comparing numbers.
+    Remember Phase 0: Failure = wrong answer, Error = crash.)
+4. Wrote the real visitor -> GREEN: all pass.
+Why this order? The numbers come from YOUR head, not from the code.
+If we ran the code first and copied its output, a bug would become
+the "expected" answer.
+
+------------------------------------------------------------------------------
+ BROKEN FILE = NO NUMBERS (the half-tree lesson, made concrete)
+------------------------------------------------------------------------------
+
+    class Half { void one() {} void two() {
+The tree stops early. A half-tree might say "1 method" - wrong, but
+it LOOKS real. So CodePulse gives NO counts:
+    outcome.syntaxTree().map(DeclarationCounter::countIn)  -> empty
+Test: aBrokenFileGetsNoCountsAtAllNotSmallerCounts
+
+------------------------------------------------------------------------------
+ HOW TO TEST SLICE 2B
+------------------------------------------------------------------------------
+
+STEP 1  cd ~/Desktop/CodePulse/backend
+STEP 2  ./mvnw test
+        Expect: Tests run: 45, Failures: 0, Errors: 0   BUILD SUCCESS
+STEP 3  CP="target/classes:$(cat target/classpath.txt)"
+        (if target/classpath.txt is missing, rebuild it:
+         ./mvnw -q dependency:build-classpath -Dmdep.outputFile=target/classpath.txt)
+STEP 4  java -cp "$CP" dev.codepulse.ParseMain src/test/resources/fixtures/declarations/Declarations.java
+        Output:
+          status: PARSED
+          types:   class 2, interface 1, enum 1, record 1, annotation 1, anonymous 1
+          members: method 10, constructor 3, executable 11, lambda 2
+        Compare with the hand tally at the bottom of the fixture file.
+STEP 5  Try it on any file in the project, e.g. PackageSummary.java,
+        and count its methods yourself first.
