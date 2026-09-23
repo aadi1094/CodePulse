@@ -15,7 +15,7 @@ Why a separate step?
 Slices:
   1A  Walk a folder, skip junk folders, sorted list with sizes   <- DONE
   1B  Count lines safely (size cap, Windows line endings)     <- DONE
-  1C  Label files MAIN / TEST / OTHER, add the workspace interface
+  1C  Label files MAIN / TEST / OTHER, add the workspace interface  <- DONE
 
 
 ------------------------------------------------------------------------------
@@ -232,3 +232,93 @@ STEP 4  Compare with the Mac's own line counter:
           wc -l src/main/java/dev/codepulse/Phase0Main.java
         It also says 44. (wc -l counts \n characters, so it only agrees
         when the file ends with a newline - ours all do.)
+
+
+==============================================================================
+ SLICE 1C - LABELS (ENUM) AND THE WORKSPACE "SOCKET" (INTERFACE)
+==============================================================================
+
+What it does:
+  Every .java file now gets a label (a "role"):
+    src/main/...            -> MAIN          (the real product code)
+    src/test/...            -> TEST          (tests)
+    anything else           -> OTHER_SOURCE  (tools, examples, scripts)
+  Non-Java files get no label (null), same as their line count.
+
+Why label at all?
+  Tests are usually simple. If we mixed them with product code, they
+  would make the whole project look simpler than it is. So later
+  reports show TEST separately (Blueprint 9.2).
+
+NEW IDEA 1 - enum = a fixed menu of choices.
+    public enum SourceRole { MAIN, TEST, OTHER_SOURCE }
+  Like a restaurant menu with exactly 3 dishes. You cannot order a 4th.
+  With a String, a typo like "MIAN" would compile and silently break
+  things. With an enum, the compiler refuses the typo.
+
+NEW IDEA 2 - interface = a socket shape.
+    public interface SourceWorkspace { Path root(); }
+  A wall socket does not care WHAT you plug in (lamp, charger), only
+  that the plug has the right shape. SourceInventory only asks for
+  "something with a root() folder".
+    Today:    LocalDirectoryWorkspace  (a folder on your laptop)
+    Phase 7:  a GitHub download unpacked into a temporary folder
+  When Phase 7 arrives, SourceInventory does NOT change. We just plug
+  in a new kind of workspace. That is the point of the interface.
+
+NEW IDEA 3 - a record can implement an interface.
+    public record LocalDirectoryWorkspace(Path root) implements SourceWorkspace
+  The record automatically has a root() accessor, which is exactly the
+  method the interface asks for. Zero extra code.
+
+NEW IDEA 4 - invariants in the constructor.
+  SourceFile checks: physicalLines and role are BOTH set (Java file) or
+  BOTH null (other file). A half-filled SourceFile cannot exist.
+
+NEW IDEA 5 - counts are calculated, not stored.
+  InventoryResult.javaFileCount() loops over the list each time.
+  If we stored the count separately, the list and the count could one
+  day disagree. Calculated = always consistent.
+
+Tricky cases the tests cover:
+  billing/src/main/java/Invoice.java  -> MAIN (multi-module project)
+  src/mainly/Odd.java                 -> OTHER_SOURCE ("mainly" != "main")
+  src/test/resources/fixtures/src/main/Fixture.java
+                                      -> TEST (the FIRST src/main or src/test wins)
+
+Debugging moment (real): 1 test failed on ORDER only. Hypothesis: my
+expected list was wrong. "src/main/java/..." vs "src/main/resources/...":
+'j' (106) comes before 'r' (114), so java sorts first. Python agreed.
+Fixed the test's expected order, not the code.
+
+
+------------------------------------------------------------------------------
+ HOW TO TEST SLICE 1C
+------------------------------------------------------------------------------
+
+STEP 1  cd ~/Desktop/CodePulse/backend
+STEP 2  ./mvnw test
+        Expect: Tests run: 32, Failures: 0, Errors: 0   BUILD SUCCESS
+STEP 3  java -cp target/classes dev.codepulse.InventoryMain .
+        Each Java file now shows its role:
+          src/main/java/dev/codepulse/engine/SourceRole.java  1401 bytes  MAIN  37 lines
+          src/test/java/.../SourceInventoryTest.java  8665 bytes  TEST  216 lines
+        And a summary at the bottom:
+          java files:     16  (MAIN 12, TEST 4, OTHER_SOURCE 0)
+          other files:    4
+          excluded files: 30
+        This summary is the first real piece of a CodePulse report:
+        how much code there is, what kind, and what was left out.
+
+
+==============================================================================
+ PHASE 1 GATE - SAY THESE IN YOUR OWN WORDS
+==============================================================================
+
+  [ ] What inventory counts, and how it differs from Java analysis.
+  [ ] Why Files.walk is inside try-with-resources (close() always runs).
+  [ ] Why we store relative "/" paths (same everywhere, no private info).
+  [ ] Why symlinks are never followed.
+  [ ] Why a non-Java file has null lines instead of 0.
+  [ ] What the SourceWorkspace interface lets Phase 7 do.
+  [ ] When to use a checked exception.

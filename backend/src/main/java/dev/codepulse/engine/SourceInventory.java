@@ -24,7 +24,8 @@ import java.util.stream.Stream;
  *   <li>Output is sorted, because the filesystem returns files in no guaranteed order.</li>
  *   <li>Symbolic links are never followed and never listed.</li>
  *   <li>Files inside an excluded directory are counted, not silently dropped.</li>
- *   <li>{@code .java} files get a physical line count; a file above the size limit stops the scan.</li>
+ *   <li>{@code .java} files get a physical line count and a {@link SourceRole}; a Java file above
+ *       the size limit stops the scan.</li>
  * </ul>
  */
 public final class SourceInventory {
@@ -56,15 +57,15 @@ public final class SourceInventory {
     }
 
     /**
-     * @param root a trusted local directory (a test fixture or developer-chosen folder)
+     * @param workspace where the files are; today a trusted local folder, later a downloaded archive
      * @return included files sorted by relative path, plus the count of excluded files
      * @throws NoSuchFileException   if root does not exist
      * @throws NotDirectoryException if root is a file or a symbolic link
      * @throws FileSizeLimitExceededException if a .java file is larger than the limit
      * @throws IOException           if the filesystem cannot be read
      */
-    public InventoryResult scan(Path root) throws IOException {
-        Path base = root.toAbsolutePath().normalize();
+    public InventoryResult scan(SourceWorkspace workspace) throws IOException {
+        Path base = workspace.root().toAbsolutePath().normalize();
         if (!Files.exists(base, LinkOption.NOFOLLOW_LINKS)) {
             throw new NoSuchFileException(base.toString());
         }
@@ -109,7 +110,7 @@ public final class SourceInventory {
     private SourceFile measure(Path path, String relativePath) throws IOException {
         long size = Files.size(path);
         if (!relativePath.endsWith(".java")) {
-            return new SourceFile(relativePath, size, null);   // not measured
+            return SourceFile.other(relativePath, size);   // listed, not measured
         }
         // Cheap early check using the size the filesystem reports ...
         if (size > maxJavaFileBytes) {
@@ -117,7 +118,7 @@ public final class SourceInventory {
         }
         // ... and the counter enforces the limit again on the bytes it actually reads.
         int lines = lineCounter.count(path, relativePath, maxJavaFileBytes);
-        return new SourceFile(relativePath, size, lines);
+        return new SourceFile(relativePath, size, lines, SourceRole.classify(relativePath));
     }
 
     /** True if any directory segment (not the file name itself) is an excluded name. */
