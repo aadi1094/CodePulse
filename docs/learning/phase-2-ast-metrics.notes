@@ -11,7 +11,7 @@ Slices (from the playbook):
   2A  Parse one file: PARSED or PARSE_FAILED                   <- DONE
   2B  Find declarations: classes, interfaces, records, methods...  <- DONE
   2C  Token-based source lines (ncloc) and comment lines       <- DONE
-  2D  Comments: TODO / FIXME markers
+  2D  Comments: TODO / FIXME markers                          <- DONE
   2E  Method line ranges
   2F  Complexity (the 5-point example)
 
@@ -389,3 +389,71 @@ STEP 4  java -cp "$CP" dev.codepulse.ParseMain src/test/resources/fixtures/lines
 STEP 5  Check blank lines another way (Mac tool):
           grep -cE '^[[:space:]]*$' src/main/java/dev/codepulse/engine/SourceScope.java
         It prints 2, same as ParseMain's "blank 2" for that file.
+
+
+==============================================================================
+ SLICE 2D - COUNTING TODO AND FIXME
+==============================================================================
+
+What it does:
+  Counts the words TODO and FIXME, but ONLY inside comments.
+  Programmers write these as notes: "this still needs work".
+
+Three rules (Blueprint 9.3):
+  1. Only inside comments.
+       // TODO fix           -> counts
+       String s = "TODO";    -> does NOT count (it is a string)
+       int FIXME = 1;        -> does NOT count (it is a variable name)
+  2. Whole word, any upper/lower case.
+       TODO  todo  Todo  TODO:  (todo)  @todo   -> count
+       TODOs  TODO_LATER  xTODO  FIX ME         -> do NOT count
+  3. Count every time it appears, not lines.
+       // TODO TODO todo    -> 3
+
+------------------------------------------------------------------------------
+ NEW IDEA - A TWO-STEP SEARCH (tokens first, then regex)
+------------------------------------------------------------------------------
+
+Step 1: tokens find the comments (same as Slice 2C). Strings and
+        variable names are never even looked at.
+Step 2: inside ONE comment's text, a regular expression (regex) finds
+        the word.
+
+Regex is a mini-language for text patterns:
+    \bTODO\b    with CASE_INSENSITIVE
+    \b = "word boundary" = the edge of a word.
+          "TODO:" -> after O comes ":" -> edge -> match
+          "TODOs" -> after O comes "s" -> no edge -> no match
+          "_" counts as a word letter, so "TODO_LATER" does not match.
+
+Why is regex OK here but NOT for finding methods?
+  Inside one comment, a word is just a word. But Java structure
+  (methods, classes) has nesting, generics, strings, comments...
+  A regex gets fooled. That is why we use the parser for structure.
+
+Pattern.compile(...) is done ONCE and stored in a static final field.
+A Pattern never changes (immutable), so it is safe to reuse.
+
+------------------------------------------------------------------------------
+ MUTATION CHECKS (real run)
+------------------------------------------------------------------------------
+
+  Removed \b            -> "TODOs TODO_LATER xTODO" gave todo 3 (should be 0)
+                          test partOfALongerWordDoesNotCount failed
+  Searched ALL tokens   -> "TODO" string and FIXME variable were counted
+                          test markersOutsideCommentsAreIgnored failed
+  Restored              -> 58/58 pass
+  Each rule has its own guard test.
+
+------------------------------------------------------------------------------
+ HOW TO TEST SLICE 2D
+------------------------------------------------------------------------------
+
+STEP 1  cd ~/Desktop/CodePulse/backend
+STEP 2  ./mvnw test
+        Expect: Tests run: 58, Failures: 0, Errors: 0   BUILD SUCCESS
+STEP 3  CP="target/classes:$(cat target/classpath.txt)"
+STEP 4  java -cp "$CP" dev.codepulse.ParseMain src/test/resources/fixtures/lines/Mixed.java
+        New last line:  markers: TODO 0, FIXME 0
+STEP 5  Make your own file with a few TODOs (some in strings, some
+        as "TODOs"), predict the count, then run ParseMain on it.

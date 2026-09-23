@@ -1,6 +1,8 @@
 package dev.codepulse;
 
 import com.github.javaparser.printer.YamlPrinter;
+import dev.codepulse.engine.CommentMarkerCounter;
+import dev.codepulse.engine.CommentMarkers;
 import dev.codepulse.engine.DeclarationCounter;
 import dev.codepulse.engine.DeclarationCounts;
 import dev.codepulse.engine.JavaSourceParser;
@@ -48,6 +50,8 @@ public final class ParseMain {
             LineMetrics lines = LineMetricsCalculator.calculate(tree, source);
             System.out.println("lines:   ncloc " + lines.ncloc() + ", comment " + lines.commentLines()
                 + ", blank " + lines.blankLines());
+            CommentMarkers markers = CommentMarkerCounter.count(tree);
+            System.out.println("markers: TODO " + markers.todoCount() + ", FIXME " + markers.fixmeCount());
         });
 
         boolean showTree = args.length > 1 && args[1].equals("--tree");
