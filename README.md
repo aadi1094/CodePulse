@@ -2,7 +2,7 @@
 
 A Java-focused, explainable codebase analyzer. It analyzes small Java repositories and produces deterministic structural reports (files, types, methods, complexity, explicit internal import relationships, parse coverage, and review-priority signals with evidence) to help developers prioritize code review.
 
-**Status: Phase 2 in progress (AST metrics). Local, plain-Java engine only; no web app yet.**
+**Status: Phase 2 implemented (AST metrics), learning gate pending. Local, plain-Java engine only; no web app yet.**
 
 This repository currently contains the specification pack and repository scaffolding only. There is no implemented application, no deployment, and no benchmark. Features are listed here only when they exist and have been verified.
 
@@ -10,7 +10,7 @@ This repository currently contains the specification pack and repository scaffol
 
 - Phase 0 learning bridge: `FileMetrics` record and a package summary (hand-written data).
 - Phase 1 source inventory: lists files under a trusted local folder, skips and counts excluded directories (`target`, `.git`, `node_modules`, ...), never follows symlinks, counts physical lines of `.java` files with a 256 KiB per-file limit, and labels Java files MAIN / TEST / OTHER_SOURCE.
-- Phase 2 (in progress): parses one Java 21 file with JavaParser 3.28.2 into PARSED or PARSE_FAILED with sanitized diagnostics. No metrics from the tree yet.
+- Phase 2 (implemented, learning gate pending): analyzes every Java file in a trusted local folder with JavaParser 3.28.2 (Java 21, no previews). Per file: parse status with sanitized diagnostics, SHA-256 content hash, package, declaration counts, token-based ncloc/comment/blank lines, TODO/FIXME counts, and per-method records with CodePulse cyclomatic-style complexity (Blueprint 9.4). Reports parse coverage. Failed files keep null metrics, never zeros.
 
 See [docs/implementation-state.md](docs/implementation-state.md) for the current slice.
 
@@ -19,7 +19,8 @@ Build and run it:
 ```
 cd backend
 ./mvnw test
-java -cp target/classes dev.codepulse.InventoryMain .
+./mvnw -q dependency:build-classpath -Dmdep.outputFile=target/classpath.txt
+java -cp "target/classes:$(cat target/classpath.txt)" dev.codepulse.AnalyzeMain .
 ```
 
 ## Roadmap (planned, not implemented)

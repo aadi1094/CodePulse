@@ -14,6 +14,7 @@ Slices (from the playbook):
   2D  Comments: TODO / FIXME markers                          <- DONE
   2E  Method line ranges (one record per method)              <- DONE
   2F  Complexity (the 5-point example)                         <- DONE
+  2G  Whole workspace: every file, parse coverage              <- DONE
 
 
 ------------------------------------------------------------------------------
@@ -631,3 +632,91 @@ STEP 4  java -cp "$CP" dev.codepulse.ParseMain src/test/resources/fixtures/compl
             lines 9-15  Complexity  fee(boolean, int)  METHOD  ncloc 7  complexity 5
             lines 23-23 Complexity  unknown()  METHOD  ncloc 1  complexity none (no body)
         Open the fixture and check each "expected N" comment.
+
+
+==============================================================================
+ SLICE 2G - PUTTING IT ALL TOGETHER (THE ENGINE'S FRONT DOOR)
+==============================================================================
+
+JavaSourceAnalyzer.analyze(workspace) runs the whole pipeline:
+
+  workspace
+    -> inventory (Phase 1)             which files, sizes, scopes
+    -> for each .java file, in path order:
+         read bytes (size cap checked AGAIN - the file might have grown)
+         SHA-256 fingerprint
+         strict UTF-8 check  -- bad bytes -->  PARSE_FAILED  ENCODING_ERROR
+         parse               -- broken    -->  PARSE_FAILED  SYNTAX_ERROR
+         PARSED: package, declarations, lines, markers, methods, max complexity
+    -> AnalysisResult: all files + parse coverage
+
+Engine rule kept: no Spring, no database, no network. Source in,
+immutable result out. One file at a time; each tree is thrown away
+after measuring, so memory does not grow with the number of files.
+
+------------------------------------------------------------------------------
+ NEW IDEA 1 - SHA-256, A FINGERPRINT FOR BYTES
+------------------------------------------------------------------------------
+
+  "class A {}\n"  ->  f119fc42a923d52c...  (64 hex characters)
+  Same bytes -> always the same fingerprint.
+  Change ONE byte -> a completely different fingerprint.
+  Use: later we can tell "this file did not change since last time"
+  without storing the source.
+  Our test compares against the Mac tool:  printf 'class A {}\n' | shasum -a 256
+  (an independent tool, so a bug in our code cannot fake the answer)
+
+------------------------------------------------------------------------------
+ NEW IDEA 2 - STRICT UTF-8 (fail loudly, never "repair" silently)
+------------------------------------------------------------------------------
+
+  Byte 0xFF can never appear in UTF-8. A lenient decoder would quietly
+  turn it into a replacement character and carry on. Then we would
+  report metrics for text that is NOT what is in the file.
+  CodingErrorAction.REPORT -> decoding fails -> PARSE_FAILED ENCODING_ERROR.
+  Mutation check (real): switched to REPLACE -> BadBytes.java became
+  "PARSED" -> 3 tests failed. Restored.
+
+------------------------------------------------------------------------------
+ NEW IDEA 3 - PARSE COVERAGE, AND WHY "0 of 0" IS NULL
+------------------------------------------------------------------------------
+
+  coverage = parsed Java files / eligible Java files
+    3 parsed of 5  -> 0.6  (60%)
+    0 of 0         -> null (unknown), NOT 0% and NOT 100%
+  Failed files stay in the denominator. Hiding them would make the
+  coverage look better than the truth.
+
+------------------------------------------------------------------------------
+ NULL vs 0, THE FULL PICTURE (asked at the Phase 2 gate)
+------------------------------------------------------------------------------
+
+  PARSE_FAILED file           -> ncloc null, maxComplexity null  (not measured)
+  PARSED file, no methods     -> maxComplexity 0                 (measured: nothing)
+  abstract method             -> complexity null                 (no body to measure)
+  method with a body          -> complexity >= 1
+  README.md                   -> physical lines null              (not Java)
+  no Java files at all        -> coverage null                    (0 of 0)
+
+------------------------------------------------------------------------------
+ REAL RUN - CODEPULSE ANALYZING ITSELF
+------------------------------------------------------------------------------
+
+  cd ~/Desktop/CodePulse/backend
+  CP="target/classes:$(cat target/classpath.txt)"
+  java -cp "$CP" dev.codepulse.AnalyzeMain .
+
+  java files: 51  parsed: 48  failed: 3
+  parse coverage: 94.1%
+  excluded files (not analyzed): 81      <- compiled files in target/
+
+  The 3 failures are our deliberately broken test fixtures
+  (MissingBrace, UnnamedClass, UnnamedVariable). Correct!
+
+  Highest complexity: 14, in JavaFileAnalysis and MethodMeasurement -
+  constructors with long && / || validation conditions. A real review
+  hint about our own code.
+
+  Try "AnalyzeMain src" instead of "." : every file becomes
+  OTHER_SOURCE, because the paths no longer start with "src/".
+  That is the scope rule working exactly as designed.

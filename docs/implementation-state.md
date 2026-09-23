@@ -1,7 +1,7 @@
 # Implementation state
 Current phase: 2
-Current slice: 2G — whole-workspace Java analysis with parse coverage (in progress).
-Last working commit: d448faa feat(engine): record per-method identity, line range, and ncloc (pushed).
+Current slice: Phase 2 complete and committed (2026-09-23); gate met. Phase 3 not started — developer taking a break; resume with "start Phase 3".
+Last working commit: 6f0e79e feat(engine): compute CodePulse cyclomatic-style method complexity (pushed).
 
 ## Implemented and personally verified
 - Slice A (2026-09-23): spec pack moved to `docs/spec/`, links fixed, git initialized on `main`, ignore policy, README. Verified by Claude; developer verification pending.
@@ -76,6 +76,14 @@ Last working commit: d448faa feat(engine): record per-method identity, line rang
   - Fixture `fixtures/complexity/Complexity.java`: 20 methods with hand-written "expected N" comments (five-point example, else-if, nested ternary, &&/||, bitwise, grouped switch, old-style switch, guarded pattern case, loops, multi-catch, lambda, anonymous, anonymous with argument, local class, constructor, abstract). `ComplexityCalculatorTest` 4 tests; `MethodCollectorTest` rows updated with complexity.
   - `ParseMain` prints complexity per method and file max.
 
+- Phase 2 Slice 2G (2026-09-23), implemented and tests pass, developer verification pending:
+  - `engine/JavaSourceAnalyzer.analyze(SourceWorkspace)`: inventory → per Java file bounded re-read (limit enforced on bytes read, NOFOLLOW_LINKS) → SHA-256 hex → strict UTF-8 (`CodingErrorAction.REPORT`) → parse → measure. Trees dropped per file.
+  - `engine/JavaFileAnalysis` record: path, scope, size, physicalLoc, contentSha256, parseStatus, diagnostics, packageName ("" default package), declarations, lines, markers, methods, maxMethodComplexity; invariant: metrics present iff PARSED; failed → null metrics and empty methods.
+  - `engine/AnalysisResult`: inventory + javaFiles; eligible/parsed/failed counts; `parseCoverage()` = parsed/eligible, null when 0 eligible.
+  - `DiagnosticCode.ENCODING_ERROR`. `dev.codepulse.AnalyzeMain` harness.
+  - `JavaSourceAnalyzerTest` 7 tests on a temp workspace (good, broken, invalid-UTF-8, default package, test scope, README, target/ excluded); SHA-256 expectations from `shasum -a 256`.
+  - Phase 2 gate fixture: `docs/learning/phase-2-gate-Cart.java` (answers verified with ParseMain, withheld until developer predicts).
+
 ## Commands and observed results
 - 2026-09-23 `java -version` → OpenJDK 21.0.11 (Homebrew). `mvn -version` → Apache Maven 3.9.16. Toolchain ready for Phase 0.
 - 2026-09-23 `git init -b main` → empty repository created; no commits.
@@ -132,7 +140,14 @@ Last working commit: d448faa feat(engine): record per-method identity, line rang
 - 2026-09-23 `./mvnw -B test` (Slice 2F) → BUILD SUCCESS, `Tests run: 68, Failures: 0, Errors: 0`; all 20 fixture expectations matched on first run.
 - 2026-09-23 Mutation checks: enter lambda bodies → `lambda(boolean)` expected 2 was 4; enter anonymous bodies → `anonymous()` expected 1 was 2; count labels not entries → `grouped(String)` expected 3 was 4; restored → 68/68.
 
+- 2026-09-23 `git commit` + `git push`: 6f0e79e Slice 2F.
+- 2026-09-23 `printf 'class A {}\n' | shasum -a 256` → f119fc42…0247; `printf '' | shasum -a 256` → e3b0c442…b855 (used as test expectations).
+- 2026-09-23 `./mvnw -B test` (Slice 2G) → BUILD SUCCESS, `Tests run: 75, Failures: 0, Errors: 0`.
+- 2026-09-23 Mutation check: UTF-8 decoder `REPLACE` instead of `REPORT` → 3 JavaSourceAnalyzerTest failures (BadBytes became PARSED); restored → 75/75.
+- 2026-09-23 `AnalyzeMain .` (backend) → java files 51, parsed 48, failed 3 (MissingBrace SYNTAX_ERROR@8, UnnamedClass UNSUPPORTED_SYNTAX@3, UnnamedVariable SYNTAX_ERROR@6), coverage 94.1%, excluded 81. Max complexity 14 in JavaFileAnalysis and MethodMeasurement constructors. `AnalyzeMain src` → all OTHER_SOURCE (paths lack `src/` prefix; rule working as designed).
+
 ## Known failures or limitations
+- Slice 2G: a UTF-8 byte-order mark is not specially handled. Encoding failures carry no line number. The analyzer does not yet support cancellation or an elapsed-time limit (Blueprint 9.1 CancellationProbe, 11.3 120 s cap); planned with the worker in Phase 8. Import graph and priorities are Phase 3.
 - Slice 2F: lambda complexity is not scored (Blueprint 9.4 MVP limitation; lambdas are only counted). Initializer blocks and field initializers are outside the metric. `case null, default ->` is treated as a default entry (adds 0); not separately tested.
 - Slice 2A: parser output is not yet connected to inventory (no per-file PARSED/PARSE_FAILED in InventoryResult); strict UTF-8 decoding of analyzed files is not implemented yet (harness uses Files.readString on trusted files). Other Java 21 preview features besides unnamed classes/variables and string templates are not individually tested. All JavaParser problems map to SYNTAX_ERROR, including preview features its validator rejects.
 - Slice 1A: symlinks are skipped without being counted; the spec's workspace rules (Phase 7) reject them at extraction. UTF-8 validity is not checked in inventory (deferred to parsing, Phase 2). The 256 KiB cap applies only to .java files; the Blueprint's archive-level caps arrive with acquisition in Phase 7.
@@ -142,6 +157,7 @@ Last working commit: d448faa feat(engine): record per-method identity, line rang
 
 ## Concepts I can explain without assistance
 - (developer fills this in; the learning gate is what the developer can explain, not what Claude generated)
+- 2026-09-23 Phase 2: parsing checks grammar not meaning; visitor + super.visit; explicit vs implicit members; token-based ncloc/comment/blank; complexity rules (else/comparisons add 0, ternary and && add 1, bodyless method = null); null (not measured) vs 0 (measured, nothing).
 - 2026-09-23 Phase 1: inventory lists files vs analysis opens them; try-with-resources calls close() even on error; null = not measured; interface lets a new workspace plug in with zero changes to SourceInventory; role rule (src/main → MAIN, src/test → TEST, else OTHER_SOURCE).
 - 2026-09-23 confirmed in gate answers: .java → javac → .class bytecode → JVM runs it; editing source has no effect until recompiled; a HashSet key mutated after insertion is searched in the wrong bucket and is lost.
 - Candidates from Slice B: JDK vs JVM vs bytecode; Maven lifecycle phases (compile → test-compile → test); what a record generates; `List<FileMetrics>` and `Map<String, Set<String>>`; why `TreeMap`/`TreeSet` give deterministic output; defensive copy with `List.copyOf`; `Set.add` returning false.
@@ -169,9 +185,10 @@ Last working commit: d448faa feat(engine): record per-method identity, line rang
 - 2026-09-23 Method signatures use JavaParser's normalized type rendering (`Type.asString()`), not raw source text, so whitespace/comments inside types do not change identity. Blueprint 9.5 says "declared parameter type text"; this is the declared type, normalized.
 - 2026-09-23 Owner label convention (Blueprint 9.3 requires only "deterministic"): "." for member types, "#" for local types, anonymous bodies (`#anonymous@<line of new>`), and enum constant bodies (`#CONSTANT`). Compact constructor signature = record component types.
 - 2026-09-23 Method range begins at the first annotation/modifier; a preceding Javadoc is not included. methodNcloc includes lines of local/anonymous classes inside the body.
+- 2026-09-23 Invalid UTF-8 → PARSE_FAILED with ENCODING_ERROR (kept in the coverage denominator), not SKIPPED. Blueprint 9.2 requires encoding problems to remain visible in coverage; SKIPPED is reserved for configured limits.
 - 2026-09-23 Inventory uses `Files.walk` + try-with-resources (teaches resource closing, the Phase 1 gate). Alternative `Files.walkFileTree` with SKIP_SUBTREE avoids descending into excluded folders; deferred.
 
-## Current learning gate (Phase 2)
+## Current learning gate (Phase 2, passed 2026-09-23) — exercise: docs/learning/phase-2-gate-Cart.java
 - Developer must: manually predict metrics for a new ~20-line fixture, explain every complexity increment, distinguish unsupported/failed data from zero; interview: how parsing differs from compilation.
 
 - 2026-09-23 Slice 2A answers: predictions 1 (undefined `hello`) PARSED and 3 (empty) PARSED correct; 2 (missing `}`) predicted PARSED, actually PARSE_FAILED (verified with ParseMain). Said "parsing does not check grammar" (backwards: it checks grammar, not meaning). Tokens vs tree: correct. Why discard recovered tree: did not know; re-taught. Why parsing is safe: correct (running could delete files/steal secrets).
@@ -189,6 +206,10 @@ Last working commit: d448faa feat(engine): record per-method identity, line rang
 - 2026-09-23 Slice 2F answers: Q1 grouped case adds 1 "because of the new style" — partial (one entry = one branch, however many labels). Q2 abstract → null "because every method is abstract" — not understood; re-taught (no body = nothing to measure; 1 would claim a path exists). Q3 and the `ship` prediction (actual 7, verified) not answered; walked through step by step, smaller practice `small(int, boolean)` (actual 3) given.
 
 - 2026-09-23 Complexity practice: `small` answered 2 (actual 3, missed the ternary); re-taught with a symbol checklist; lambda-as-separate-unit re-taught with a deferred Runnable example. `ok(int, boolean)` answered 3 — correct (1 + if + &&).
+
+- 2026-09-23 Phase 2 gate, first attempt on phase-2-gate-Cart.java: correct class 1, interface 1, constructor 1, executable 2, comment 1, blank 4, TODO 1; wrong methods (1, actual 2), total() complexity (7, actual 5), applies() complexity ("a number", actual null), ncloc (18, actual 17). Re-taught: bodyless interface method counts as method with null complexity; else and comparisons add 0.
+- 2026-09-23 Gate retry: methods 2, applies null, else adds 0, ternary `?` adds 1 (not `>`) — all correct. Final: Q6 failed file null / parsed-without-bodies 0 — correct (b); Q7 parser checks grammar only — correct (b).
+  - Phase 2 gate status: MET on 2026-09-23.
 
 ## Current learning gate (Phase 1, passed 2026-09-23)
 - Developer must explain: what inventory counts vs what Java analysis does; why Files.walk is closed (try-with-resources, OS handles, even on exception); how paths are normalized and exclusions applied; when to use a checked exception.
@@ -221,7 +242,7 @@ Last working commit: d448faa feat(engine): record per-method identity, line rang
   - Gate status: MET for the concept questions on 2026-09-23. Failures vs Errors was corrected in teaching; revisit briefly in Phase 1 when the first test fails.
 
 ## Next smallest slice
-- Slice 2G (last Phase 2 slice): analyze a whole workspace — for each Java file from SourceInventory: strict UTF-8 decode (invalid → PARSE_FAILED with an encoding code), parse, and when PARSED collect packageName, declaration counts, line metrics, markers, methods, maxMethodComplexity into one immutable per-file result; failed files keep null metrics. Parse coverage = parsed / eligible. Then the Phase 2 gate: developer predicts a new ~20-line fixture by hand.
+- Phase 3, slice 1: build the unique type-name index from parsed files and the explicit internal import graph (`explicit-import-v1`, Blueprint 9.6) — concept lesson first: graphs, nodes/edges, sets of immutable edge records.
 
 ## Suggested commit
 - None pending.
