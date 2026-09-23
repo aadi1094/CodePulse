@@ -34,17 +34,38 @@ public final class LineMetricsCalculator {
         Set<Integer> codeLines = new HashSet<>();
         Set<Integer> commentLines = new HashSet<>();
         for (JavaToken token : tokens) {
-            Set<Integer> target = switch (token.getCategory()) {
-                case KEYWORD, IDENTIFIER, LITERAL, SEPARATOR, OPERATOR -> codeLines;
-                case COMMENT -> commentLines;
-                case WHITESPACE_NO_EOL, EOL -> null;   // spaces and line breaks are not code
-            };
+            Set<Integer> target = null;                // spaces and line breaks count nowhere
+            if (isCodeToken(token)) {
+                target = codeLines;
+            } else if (token.getCategory() == JavaToken.Category.COMMENT) {
+                target = commentLines;
+            }
             Optional<Range> range = token.getRange();
             if (target != null && range.isPresent()) {
                 addLines(target, range.get().begin.line, range.get().end.line);
             }
         }
         return new LineMetrics(codeLines.size(), commentLines.size(), countBlankLines(sourceText));
+    }
+
+    /** Code tokens: keyword, identifier, literal, separator, operator. Not comments or whitespace. */
+    static boolean isCodeToken(JavaToken token) {
+        return switch (token.getCategory()) {
+            case KEYWORD, IDENTIFIER, LITERAL, SEPARATOR, OPERATOR -> true;
+            case COMMENT, WHITESPACE_NO_EOL, EOL -> false;
+        };
+    }
+
+    /** Distinct lines touched by code tokens inside one token range (e.g. one method). */
+    static int codeLinesIn(TokenRange tokens) {
+        Set<Integer> lines = new HashSet<>();
+        for (JavaToken token : tokens) {
+            Optional<Range> range = token.getRange();
+            if (isCodeToken(token) && range.isPresent()) {
+                addLines(lines, range.get().begin.line, range.get().end.line);
+            }
+        }
+        return lines.size();
     }
 
     private static void addLines(Set<Integer> lines, int firstLine, int lastLine) {

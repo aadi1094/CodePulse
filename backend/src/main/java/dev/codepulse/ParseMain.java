@@ -8,6 +8,8 @@ import dev.codepulse.engine.DeclarationCounts;
 import dev.codepulse.engine.JavaSourceParser;
 import dev.codepulse.engine.LineMetrics;
 import dev.codepulse.engine.LineMetricsCalculator;
+import dev.codepulse.engine.MethodCollector;
+import dev.codepulse.engine.MethodMeasurement;
 import dev.codepulse.engine.ParseDiagnostic;
 import dev.codepulse.engine.ParseOutcome;
 
@@ -52,6 +54,12 @@ public final class ParseMain {
                 + ", blank " + lines.blankLines());
             CommentMarkers markers = CommentMarkerCounter.count(tree);
             System.out.println("markers: TODO " + markers.todoCount() + ", FIXME " + markers.fixmeCount());
+            System.out.println("methods:");
+            for (MethodMeasurement method : MethodCollector.collect(tree)) {
+                System.out.printf("  lines %d-%d  %s  %s  %s%s  ncloc %d%n",
+                    method.beginLine(), method.endLine(), method.ownerLabel(), method.signature(),
+                    method.declarationKind(), method.hasBody() ? "" : " (no body)", method.ncloc());
+            }
         });
 
         boolean showTree = args.length > 1 && args[1].equals("--tree");

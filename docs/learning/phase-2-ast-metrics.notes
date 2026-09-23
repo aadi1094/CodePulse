@@ -12,7 +12,7 @@ Slices (from the playbook):
   2B  Find declarations: classes, interfaces, records, methods...  <- DONE
   2C  Token-based source lines (ncloc) and comment lines       <- DONE
   2D  Comments: TODO / FIXME markers                          <- DONE
-  2E  Method line ranges
+  2E  Method line ranges (one record per method)              <- DONE
   2F  Complexity (the 5-point example)
 
 
@@ -457,3 +457,92 @@ STEP 4  java -cp "$CP" dev.codepulse.ParseMain src/test/resources/fixtures/lines
         New last line:  markers: TODO 0, FIXME 0
 STEP 5  Make your own file with a few TODOs (some in strings, some
         as "TODOs"), predict the count, then run ParseMain on it.
+
+
+==============================================================================
+ SLICE 2E - ONE RECORD PER METHOD
+==============================================================================
+
+What it does:
+  For every method and constructor, one MethodMeasurement:
+    ownerLabel       which class it belongs to
+    signature        name + parameter types, e.g. price(int, int)
+    declarationKind  METHOD / CONSTRUCTOR / COMPACT_CONSTRUCTOR
+    hasBody          false for abstract methods
+    beginLine, endLine
+    ncloc            code lines inside the method
+  (the field names come straight from the database schema and API)
+
+------------------------------------------------------------------------------
+ BIG IDEA 1 - IDENTITY: HOW DO WE TELL TWO METHODS APART?
+------------------------------------------------------------------------------
+
+    int price(int units)                 -> price(int)
+    int price(int units, int discount)   -> price(int, int)
+Same NAME, different PARAMETERS = "overloads". If we used only the
+name, the second would overwrite the first. So identity =
+    owner + signature + begin line
+Two methods can never share all three. The code checks this and
+throws an error if it ever happens.
+
+Signatures are NORMALIZED (real finding while testing):
+    Map<String, Integer>      -> Map<String,Integer>
+    Map< String ,  Integer >  -> Map<String,Integer>
+JavaParser re-prints the type from the tree, dropping spaces and
+comments. Good for us: reformatting code does not change identity.
+
+------------------------------------------------------------------------------
+ BIG IDEA 2 - OWNER LABELS AND THE STACK
+------------------------------------------------------------------------------
+
+    Shop                 method directly in class Shop
+    Shop.Size            "." = member type, a real importable name
+    Shop#Local           "#" = local class inside a method (not importable)
+    Shop#anonymous@48    the anonymous "new Runnable() {...}" on line 48
+    Shop.Size#SMALL      the body of enum constant SMALL
+
+How does the visitor know the owner? A STACK (a pile of plates):
+    enter class Shop       push "Shop"          pile: [Shop]
+    enter enum Size        push "Shop.Size"     pile: [Shop.Size, Shop]
+      method weight()  -> owner = top of pile = "Shop.Size"
+    leave enum Size        pop                  pile: [Shop]
+    leave class Shop       pop                  pile: []
+
+Java: Deque<String> owners = new ArrayDeque<>();
+      owners.push(x)   put on top
+      owners.peek()    look at top
+      owners.pop()     take off top
+
+Mutation check (real): removed owners.pop() -> labels went wrong ->
+fixture test failed. Restored -> 64/64 pass.
+
+------------------------------------------------------------------------------
+ METHOD LINE RANGE RULES
+------------------------------------------------------------------------------
+
+    /** Javadoc */      <- NOT part of the method (comments sit outside)
+    @Deprecated         <- beginLine (annotations ARE part of it)
+    String format(...) {
+        // comment      <- inside, but not a code line
+        return pattern;
+    }                   <- endLine
+    ncloc = 4  (annotation, signature, return, closing brace)
+
+task() in the fixture has ncloc 11 because the local class and the
+anonymous class are INSIDE its lines. Their own methods also get
+their own records.
+
+------------------------------------------------------------------------------
+ HOW TO TEST SLICE 2E
+------------------------------------------------------------------------------
+
+STEP 1  cd ~/Desktop/CodePulse/backend
+STEP 2  ./mvnw test
+        Expect: Tests run: 64, Failures: 0, Errors: 0   BUILD SUCCESS
+STEP 3  CP="target/classes:$(cat target/classpath.txt)"
+STEP 4  java -cp "$CP" dev.codepulse.ParseMain src/test/resources/fixtures/declarations/Declarations.java
+        New "methods:" section, one line per method, e.g.
+          lines 39-41  Shop  price(int, int)  METHOD  ncloc 3
+          lines 45-46  Shop#Local  run()  METHOD  ncloc 2
+          lines 62-62  Shop.Size  weight()  METHOD (no body)  ncloc 1
+        Open the fixture and check a few line numbers yourself.

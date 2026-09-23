@@ -1,7 +1,7 @@
 # Implementation state
 Current phase: 2
-Current slice: 2E — per-method records (in progress).
-Last working commit: 8ae7cf9 feat(engine): measure ncloc, comment, and blank lines from tokens (pushed).
+Current slice: 2F — method complexity (in progress).
+Last working commit: d340153 feat(engine): count TODO and FIXME markers inside comment tokens (pushed).
 
 ## Implemented and personally verified
 - Slice A (2026-09-23): spec pack moved to `docs/spec/`, links fixed, git initialized on `main`, ignore policy, README. Verified by Claude; developer verification pending.
@@ -64,6 +64,12 @@ Last working commit: 8ae7cf9 feat(engine): measure ncloc, comment, and blank lin
   - `engine/CommentMarkers` record (todoCount, fixmeCount); `engine/CommentMarkerCounter.count(tree)`: COMMENT tokens only, static final `\bTODO\b` / `\bFIXME\b` CASE_INSENSITIVE patterns, occurrences counted with `Matcher.find()`.
   - `CommentMarkerCounterTest` 6 tests (all comment kinds, occurrences, whole-word any case, longer words excluded, markers in strings/identifiers ignored, empty file). `ParseMain` prints markers.
 
+- Phase 2 Slice 2E (2026-09-23), implemented and tests pass, developer verification pending:
+  - `engine/DeclarationKind` (METHOD, CONSTRUCTOR, COMPACT_CONSTRUCTOR), `engine/MethodMeasurement` (ownerLabel, signature, declarationKind, hasBody, beginLine, endLine, ncloc) matching schema `method_metric` / API `MethodMetric` minus complexity.
+  - `engine/MethodCollector` visitor with a `Deque<String>` owner stack; owner labels: top-level `A`, member `A.B`, local `A#L`, anonymous `A#anonymous@<line>`, enum constant body `A.E#CONST`. Compact constructor signature uses record component types. Sorted by begin line, owner, signature; duplicate (owner, signature, beginLine) → IllegalStateException.
+  - `LineMetricsCalculator.isCodeToken` / `codeLinesIn(TokenRange)` shared for method ncloc.
+  - `MethodCollectorTest` 6 tests (13 hand-written rows for Declarations.java; count consistency with DeclarationCounter; annotations/javadoc/comments; nested/local owners; reformatting-invariant signature; no methods). `ParseMain` prints methods.
+
 ## Commands and observed results
 - 2026-09-23 `java -version` → OpenJDK 21.0.11 (Homebrew). `mvn -version` → Apache Maven 3.9.16. Toolchain ready for Phase 0.
 - 2026-09-23 `git init -b main` → empty repository created; no commits.
@@ -111,6 +117,11 @@ Last working commit: 8ae7cf9 feat(engine): measure ncloc, comment, and blank lin
 - 2026-09-23 `./mvnw -B test` (Slice 2D) → BUILD SUCCESS, `Tests run: 58, Failures: 0, Errors: 0`.
 - 2026-09-23 Mutation checks: patterns without `\b` → `partOfALongerWordDoesNotCount` failed (todo 3, fixme 1 instead of 0,0); all tokens instead of comments → `markersOutsideCommentsAreIgnored` failed (1,1 instead of 0,0); restored → 58/58.
 
+- 2026-09-23 `git commit` + `git push`: d340153 Slice 2D.
+- 2026-09-23 `./mvnw -B test` (Slice 2E, first run) → 1 failure: signature expected `Map<String, Integer>` was `Map<String,Integer>`. Hypothesis: `Type.asString()` renders a normalized type. Evidence: probe showed `Map<String, Integer>`, `Map<String,Integer>`, `Map< String ,  Integer >`, `Map<String,/*c*/Integer>` all → `Map<String,Integer>`; `int []` → `int[]`. Decision: keep normalized form; updated expectation and added reformatting test.
+- 2026-09-23 `./mvnw -B test` (Slice 2E) → BUILD SUCCESS, `Tests run: 64, Failures: 0, Errors: 0`.
+- 2026-09-23 Mutation check: removed `owners.pop()` in class visitor → Declarations fixture test failed; restored → 64/64.
+
 ## Known failures or limitations
 - Slice 2A: parser output is not yet connected to inventory (no per-file PARSED/PARSE_FAILED in InventoryResult); strict UTF-8 decoding of analyzed files is not implemented yet (harness uses Files.readString on trusted files). Other Java 21 preview features besides unnamed classes/variables and string templates are not individually tested. All JavaParser problems map to SYNTAX_ERROR, including preview features its validator rejects.
 - Slice 1A: symlinks are skipped without being counted; the spec's workspace rules (Phase 7) reject them at extraction. UTF-8 validity is not checked in inventory (deferred to parsing, Phase 2). The 256 KiB cap applies only to .java files; the Blueprint's archive-level caps arrive with acquisition in Phase 7.
@@ -144,6 +155,9 @@ Last working commit: 8ae7cf9 feat(engine): measure ncloc, comment, and blank lin
 - 2026-09-23 Declaration counting choices where Blueprint 9.3 is silent: annotation members (`String value();` in `@interface`) are not methods; methods inside enum constant bodies, local classes, and anonymous classes count toward the file's methodCount; enum constant bodies are not anonymous classes (only `new X() { }` object creations are); lambdas are counted but never executables.
 - 2026-09-23 blankLines follows Blueprint 9.3 literally ("lines containing only whitespace; separate from token metrics"): measured on raw text, so empty lines inside block comments or text blocks are blank AND comment/code. Whitespace = space, tab, form feed (JLS 3.6).
 - 2026-09-23 TODO/FIXME "whole word" uses Java regex `\b` with default (ASCII) word characters: letters, digits, underscore. So `TODO_LATER` is not a marker.
+- 2026-09-23 Method signatures use JavaParser's normalized type rendering (`Type.asString()`), not raw source text, so whitespace/comments inside types do not change identity. Blueprint 9.5 says "declared parameter type text"; this is the declared type, normalized.
+- 2026-09-23 Owner label convention (Blueprint 9.3 requires only "deterministic"): "." for member types, "#" for local types, anonymous bodies (`#anonymous@<line of new>`), and enum constant bodies (`#CONSTANT`). Compact constructor signature = record component types.
+- 2026-09-23 Method range begins at the first annotation/modifier; a preceding Javadoc is not included. methodNcloc includes lines of local/anonymous classes inside the body.
 - 2026-09-23 Inventory uses `Files.walk` + try-with-resources (teaches resource closing, the Phase 1 gate). Alternative `Files.walkFileTree` with SKIP_SUBTREE avoids descending into excluded folders; deferred.
 
 ## Current learning gate (Phase 2)
@@ -158,6 +172,8 @@ Last working commit: 8ae7cf9 feat(engine): measure ncloc, comment, and blank lin
 - 2026-09-23 Slice 2C prediction: ncloc 2 (actual 3, missed a code line), comment 2 and blank 1 correct (verified with ParseMain). Q1 string literal not a comment: correct. Q2 Set avoids duplicates: correct. Q3 code+comment line: "because of //" — partially right (code first, then a // comment on the same line).
 
 - 2026-09-23 Slice 2D answers: string token not searched; `\b` word boundary; regex fooled by nesting/generics/strings — all correct.
+
+- 2026-09-23 Slice 2E answers: Q1 overloads would overwrite each other — correct. Q2 missing pop → "not get the data" — vague; correct answer: old owner stays on the stack so later methods get wrong owner labels. Q3 `#` = local class inside a method — correct (not importable). Bank prediction skipped at developer's request ("commit and continue"); Q2 re-explained with a two-class stack trace.
 
 ## Current learning gate (Phase 1, passed 2026-09-23)
 - Developer must explain: what inventory counts vs what Java analysis does; why Files.walk is closed (try-with-resources, OS handles, even on exception); how paths are normalized and exclusions applied; when to use a checked exception.
@@ -190,7 +206,7 @@ Last working commit: 8ae7cf9 feat(engine): measure ncloc, comment, and blank lin
   - Gate status: MET for the concept questions on 2026-09-23. Failures vs Errors was corrected in teaching; revisit briefly in Phase 1 when the first test fails.
 
 ## Next smallest slice
-- Slice 2E: method records — one entry per explicit method/constructor with owner label, signature (name + declared parameter type text), begin/end line, methodNcloc, and whether it has a body; overloads must stay separate (Blueprint 9.5 method identity). Concept lesson first: identity vs equality, ranges.
+- Slice 2F: CodePulse cyclomatic-style complexity per executable (Blueprint 9.4): start 1; +1 for if, for, foreach, while, do, catch, ternary, &&, ||, each non-default switch entry with labels (grouped labels = one), guard as one decision; skip nested type bodies and lambda bodies; abstract → null. Five-point example first; fixtures for grouped switch, nested ternary, multi-catch, else-if, lambdas. Then maxMethodComplexity per file.
 
 ## Suggested commit
 - None pending.
