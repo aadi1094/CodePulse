@@ -1,0 +1,178 @@
+==============================================================================
+ PHASE 2 NOTES - READING THE CODE (AST METRICS AND COMPLEXITY)
+==============================================================================
+
+Goal of Phase 2:
+  Phase 1 looked at files from the OUTSIDE (name, size, lines).
+  Phase 2 OPENS each .java file and understands the code inside:
+  which classes and methods exist, and how complicated each method is.
+
+Slices (from the playbook):
+  2A  Parse one file: PARSED or PARSE_FAILED                   <- DONE
+  2B  Find declarations: classes, interfaces, records, methods...
+  2C  Token-based source lines (ncloc) and comment lines
+  2D  Comments: TODO / FIXME markers
+  2E  Method line ranges
+  2F  Complexity (the 5-point example)
+
+
+------------------------------------------------------------------------------
+ BIG IDEA - THREE WAYS TO SEE CODE: TEXT, TOKENS, TREE
+------------------------------------------------------------------------------
+
+Take this one line:   if (x > 10) say();
+
+1. TEXT   = just characters.  'i' 'f' ' ' '(' 'x' ...
+            A computer sees letters. It does not know what "if" means.
+
+2. TOKENS = the text chopped into WORDS.
+            [if] [(] [x] [>] [10] [)] [say] [(] [)] [;]
+            Like splitting an English sentence into words.
+
+3. TREE (AST = Abstract Syntax Tree) = the words arranged by MEANING.
+
+            IfStmt
+            |-- condition:  BinaryExpr  ( x  >  10 )
+            |-- thenStmt:   MethodCall  say()
+
+            Like a sentence diagram from grammar class:
+            subject, verb, object.
+
+Why do we need the tree?
+  To count methods, we need to know "this is a method". A text search
+  for "void" would be fooled by a comment like  // void of meaning
+  or a string like "void". The tree is never fooled: it knows exactly
+  which part is a method, which is a comment, which is a string.
+
+See a real tree yourself:  (commands at the bottom of this file)
+  ParseMain SourceWorkspace.java --tree
+  shows CompilationUnit -> packageDeclaration -> imports -> types ->
+  ClassOrInterfaceDeclaration (isInterface: true) -> MethodDeclaration "root"
+
+
+------------------------------------------------------------------------------
+ BIG IDEA - PARSING IS NOT COMPILING (safe vs dangerous)
+------------------------------------------------------------------------------
+
+  Parsing   = READ the code and build the tree.   Like reading a recipe.
+  Compiling = turn it into bytecode (javac).      Like preparing to cook.
+  Running   = execute it (java).                  Like cooking and eating.
+
+CodePulse only PARSES. It never compiles or runs analyzed code.
+Why? The code comes from strangers on GitHub. Running it could delete
+files or steal secrets. Reading a recipe cannot burn your kitchen.
+
+Parsing also needs LESS than compiling: the parser does not need the
+other files or libraries the code uses. It checks grammar, not meaning.
+  "int x = hello;"  parses fine (grammar OK) even if "hello" does not
+  exist. A compiler would reject it. A parser does not care.
+
+
+------------------------------------------------------------------------------
+ SLICE 2A - NEW IDEAS
+------------------------------------------------------------------------------
+
+1. A LIBRARY (dependency): JavaParser 3.28.2
+   Added to pom.xml. Maven downloads it into ~/.m2 once.
+   We pin the exact version so everybody gets identical results.
+   The spec (API contract) also records "parser": "3.28.2" in reports.
+
+2. PARSED vs PARSE_FAILED
+   Broken code (missing "}") -> PARSE_FAILED.
+   SURPRISE we found by experiment: JavaParser still returns a
+   half-built "recovered" tree for broken code. We IGNORE it.
+   Half a tree = half-true numbers. CodePulse never guesses.
+
+3. Java 21 WITHOUT previews
+   "Preview" features are experiments that Java may still change.
+   Our promise is Java 21 final features only.
+   - "int _ = 1;"          (preview in 21) -> JavaParser rejects it
+   - "void main() {...}"   alone in a file (preview in 21) -> JavaParser
+                           ACCEPTS it! So we added our own check
+                           (isCompact) -> UNSUPPORTED_SYNTAX.
+   Lesson: do not assume a library does what you need. Test it.
+
+4. Diagnostics WITHOUT source text (security)
+   JavaParser's error message can quote the code, e.g. a variable
+   called passwordValue. We keep ONLY:
+       code (SYNTAX_ERROR / UNSUPPORTED_SYNTAX), line, column
+   A test checks that "passwordValue" never appears in a diagnostic.
+   We keep at most 10 diagnostics per file, but count all of them.
+
+5. Optional = a box that may be empty.
+     outcome.syntaxTree()  returns Optional<CompilationUnit>
+     PARSED       -> box has the tree
+     PARSE_FAILED -> box is empty
+   Instead of null (which you can forget to check), Optional FORCES
+   you to think "what if it is empty?".
+     tree.ifPresentOrElse(t -> print(t), () -> print("no tree"));
+   Chaining:  a.flatMap(...).map(...)  keeps going only while there
+   is a value. If any step is empty, the result is empty. We use this
+   to get an error's line number, which JavaParser does not always have.
+   Unknown line -> null (unknown), never 0.
+
+6. Why ParseOutcome is a CLASS, not a RECORD
+   A record makes every field public through an accessor. That would
+   expose a tree field that is null for failed parses. As a class,
+   the ONLY way to reach the tree is syntaxTree(), which returns
+   Optional. The design makes the mistake impossible.
+
+7. No global parser
+   We create our own JavaParser object with fixed settings (Java 21,
+   UTF-8), instead of the global StaticJavaParser. Global settings can
+   be changed by anyone, anywhere; our own object cannot.
+
+8. Test fixtures in src/test/resources
+   Fixture files like MissingBrace.java are plain TEXT that contain
+   Java. Maven copies resources without compiling them, so broken
+   fixtures do not break our build. Tests load them from the
+   classpath with getResourceAsStream.
+
+
+------------------------------------------------------------------------------
+ DEBUGGING / REVIEW LESSON FROM 2A (real)
+------------------------------------------------------------------------------
+
+The first version of the "cap at 10 diagnostics" test passed, but it
+was WEAK. Running the input by hand showed it produced only 1 problem,
+so the cap was never reached. A test that cannot fail proves nothing.
+Fix: 15 "int _" lines -> exactly 15 problems -> test checks 15 counted,
+10 kept, first at line 3 col 9, last kept at line 12 col 9.
+Lesson: after a test passes, ask "would this test FAIL if the code
+were wrong?"
+
+
+------------------------------------------------------------------------------
+ HOW TO TEST SLICE 2A, STEP BY STEP
+------------------------------------------------------------------------------
+
+STEP 1  cd ~/Desktop/CodePulse/backend
+STEP 2  ./mvnw test
+        Expect: Tests run: 39, Failures: 0, Errors: 0   BUILD SUCCESS
+        (JavaSourceParserTest: 7 tests)
+
+STEP 3  JavaParser is now a library, so "java -cp target/classes" is not
+        enough. Ask Maven for the full list of jars once:
+          ./mvnw -q dependency:build-classpath -Dmdep.outputFile=target/classpath.txt
+        Then:
+          CP="target/classes:$(cat target/classpath.txt)"
+
+STEP 4  Parse a broken file:
+          java -cp "$CP" dev.codepulse.ParseMain src/test/resources/fixtures/parse/MissingBrace.java
+        Output:
+          status: PARSE_FAILED
+          problems: 1
+            SYNTAX_ERROR at line 8, column 5
+        Meaning: line 8 is the end of the file; the parser reached the end
+        still waiting for "}".
+
+STEP 5  Parse a preview feature:
+          java -cp "$CP" dev.codepulse.ParseMain src/test/resources/fixtures/parse/UnnamedClass.java
+        Output: status: PARSE_FAILED, UNSUPPORTED_SYNTAX at line 3, column 1
+
+STEP 6  SEE A TREE (best learning step):
+          java -cp "$CP" dev.codepulse.ParseMain src/main/java/dev/codepulse/engine/SourceWorkspace.java --tree
+        Find: CompilationUnit, packageDeclaration, imports,
+        ClassOrInterfaceDeclaration (isInterface: "true"),
+        MethodDeclaration with name "root".
+        Try it on Phase0Main.java too, and find the IfStmt.

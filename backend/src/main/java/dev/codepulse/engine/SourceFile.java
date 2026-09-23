@@ -4,16 +4,16 @@ package dev.codepulse.engine;
  * One regular file found during inventory.
  *
  * <p>Java files ({@code .java}) are measured and classified; every other file is only listed with
- * its size. For non-Java files both {@code physicalLines} and {@code role} are null.
+ * its size. For non-Java files both {@code physicalLines} and {@code scope} are null.
  *
  * @param relativePath  path relative to the scanned root, always using "/" (POSIX style), e.g.
  *                      {@code src/main/java/App.java}. This is a logical name, never a server path.
  * @param sizeBytes     file size in bytes as reported by the filesystem
  * @param physicalLines physical line count ({@code physicalLoc}) for Java files, or {@code null}
  *                      when not measured. Null means "not measured", 0 means "measured, empty".
- * @param role          MAIN / TEST / OTHER_SOURCE for Java files, or {@code null} for other files
+ * @param scope          MAIN / TEST / OTHER_SOURCE for Java files, or {@code null} for other files
  */
-public record SourceFile(String relativePath, long sizeBytes, Integer physicalLines, SourceRole role) {
+public record SourceFile(String relativePath, long sizeBytes, Integer physicalLines, SourceScope scope) {
 
     public SourceFile {
         if (relativePath == null || relativePath.isBlank()) {
@@ -29,8 +29,8 @@ public record SourceFile(String relativePath, long sizeBytes, Integer physicalLi
             throw new IllegalArgumentException("physicalLines must be >= 0, was " + physicalLines);
         }
         // Invariant: a file is either a measured, classified Java file, or neither.
-        if ((physicalLines == null) != (role == null)) {
-            throw new IllegalArgumentException("physicalLines and role must both be set or both be null: " + relativePath);
+        if ((physicalLines == null) != (scope == null)) {
+            throw new IllegalArgumentException("physicalLines and scope must both be set or both be null: " + relativePath);
         }
     }
 
@@ -41,6 +41,6 @@ public record SourceFile(String relativePath, long sizeBytes, Integer physicalLi
 
     /** @return true if this is a Java file that was measured and classified */
     public boolean isJava() {
-        return role != null;
+        return scope != null;
     }
 }

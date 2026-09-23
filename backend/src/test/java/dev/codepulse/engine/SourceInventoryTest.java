@@ -112,7 +112,7 @@ class SourceInventoryTest {
 
         assertEquals(List.of(
             SourceFile.other("README.md", 18),          // not measured: null, not 0
-            new SourceFile("src/App.java", 14, 2, SourceRole.OTHER_SOURCE)), result.files());
+            new SourceFile("src/App.java", 14, 2, SourceScope.OTHER_SOURCE)), result.files());
     }
 
     @Test
@@ -122,7 +122,7 @@ class SourceInventoryTest {
 
         InventoryResult result = tenByteLimit.scan(workspace(root));
 
-        assertEquals(List.of(new SourceFile("A.java", 10, 1, SourceRole.OTHER_SOURCE)), result.files());
+        assertEquals(List.of(new SourceFile("A.java", 10, 1, SourceScope.OTHER_SOURCE)), result.files());
     }
 
     @Test
@@ -149,38 +149,38 @@ class SourceInventoryTest {
     }
 
     @Test
-    void classifiesJavaFilesByRoleAndCountsThem() throws IOException {
+    void classifiesJavaFilesByScopeAndCountsThem() throws IOException {
         write("src/main/java/App.java", "class App {}");
         write("src/test/java/AppTest.java", "class AppTest {}");
         write("billing/src/main/java/Invoice.java", "class Invoice {}");   // multi-module: still MAIN
         write("tools/Gen.java", "class Gen {}");
         write("src/mainly/Odd.java", "class Odd {}");                        // "mainly" is not "main"
-        write("src/main/resources/app.properties", "x=1");                   // not Java: no role
+        write("src/main/resources/app.properties", "x=1");                   // not Java: no scope
 
         InventoryResult result = inventory.scan(workspace(root));
 
         assertEquals(List.of(
-            new SourceFile("billing/src/main/java/Invoice.java", 16, 1, SourceRole.MAIN),
-            new SourceFile("src/main/java/App.java", 12, 1, SourceRole.MAIN),
+            new SourceFile("billing/src/main/java/Invoice.java", 16, 1, SourceScope.MAIN),
+            new SourceFile("src/main/java/App.java", 12, 1, SourceScope.MAIN),
             SourceFile.other("src/main/resources/app.properties", 3),       // "java" < "resources"
-            new SourceFile("src/mainly/Odd.java", 12, 1, SourceRole.OTHER_SOURCE),
-            new SourceFile("src/test/java/AppTest.java", 16, 1, SourceRole.TEST),
-            new SourceFile("tools/Gen.java", 12, 1, SourceRole.OTHER_SOURCE)), result.files());
+            new SourceFile("src/mainly/Odd.java", 12, 1, SourceScope.OTHER_SOURCE),
+            new SourceFile("src/test/java/AppTest.java", 16, 1, SourceScope.TEST),
+            new SourceFile("tools/Gen.java", 12, 1, SourceScope.OTHER_SOURCE)), result.files());
         assertEquals(5, result.javaFileCount());
         assertEquals(1, result.otherFileCount());
-        assertEquals(2, result.javaFileCount(SourceRole.MAIN));
-        assertEquals(1, result.javaFileCount(SourceRole.TEST));
-        assertEquals(2, result.javaFileCount(SourceRole.OTHER_SOURCE));
+        assertEquals(2, result.javaFileCount(SourceScope.MAIN));
+        assertEquals(1, result.javaFileCount(SourceScope.TEST));
+        assertEquals(2, result.javaFileCount(SourceScope.OTHER_SOURCE));
     }
 
     @Test
-    void firstSrcMainOrSrcTestInThePathDecidesTheRole() throws IOException {
+    void firstSrcMainOrSrcTestInThePathDecidesTheScope() throws IOException {
         // A fixture that lives inside test code is TEST, even though "src/main" appears later.
         write("src/test/resources/fixtures/src/main/Fixture.java", "class F {}");
 
         InventoryResult result = inventory.scan(workspace(root));
 
-        assertEquals(SourceRole.TEST, result.files().get(0).role());
+        assertEquals(SourceScope.TEST, result.files().get(0).scope());
     }
 
     @Test

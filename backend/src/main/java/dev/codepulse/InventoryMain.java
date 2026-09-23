@@ -4,7 +4,7 @@ import dev.codepulse.engine.InventoryResult;
 import dev.codepulse.engine.LocalDirectoryWorkspace;
 import dev.codepulse.engine.SourceFile;
 import dev.codepulse.engine.SourceInventory;
-import dev.codepulse.engine.SourceRole;
+import dev.codepulse.engine.SourceScope;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -25,15 +25,15 @@ public final class InventoryMain {
         InventoryResult result = new SourceInventory().scan(new LocalDirectoryWorkspace(Path.of(args[0])));
         for (SourceFile file : result.files()) {
             String details = file.isJava()
-                ? file.role() + "  " + file.physicalLines() + " lines"
+                ? file.scope() + "  " + file.physicalLines() + " lines"
                 : "not java";
             System.out.println(file.relativePath() + "  " + file.sizeBytes() + " bytes  " + details);
         }
         System.out.println();
         System.out.println("java files:     " + result.javaFileCount()
-            + "  (MAIN " + result.javaFileCount(SourceRole.MAIN)
-            + ", TEST " + result.javaFileCount(SourceRole.TEST)
-            + ", OTHER_SOURCE " + result.javaFileCount(SourceRole.OTHER_SOURCE) + ")");
+            + "  (MAIN " + result.javaFileCount(SourceScope.MAIN)
+            + ", TEST " + result.javaFileCount(SourceScope.TEST)
+            + ", OTHER_SOURCE " + result.javaFileCount(SourceScope.OTHER_SOURCE) + ")");
         System.out.println("other files:    " + result.otherFileCount());
         System.out.println("excluded files: " + result.excludedFileCount());
     }

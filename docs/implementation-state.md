@@ -1,7 +1,7 @@
 # Implementation state
-Current phase: 1
-Current slice: 1C committed and pushed. All Phase 1 slices done; Phase 1 gate partially met (see below). Phase 2 not started.
-Last working commit: 0bcf965 feat(engine): count physical lines with bounded reads and size limit (Slice 1B, committed and pushed by the developer).
+Current phase: 2
+Current slice: 2B — declaration counts via a dedicated visitor (in progress).
+Last working commit: 229e481 feat(engine): classify Java files by source role behind a workspace interface (pushed).
 
 ## Implemented and personally verified
 - Slice A (2026-09-23): spec pack moved to `docs/spec/`, links fixed, git initialized on `main`, ignore policy, README. Verified by Claude; developer verification pending.
@@ -40,6 +40,14 @@ Last working commit: 0bcf965 feat(engine): count physical lines with bounded rea
   - `InventoryMain` prints role per Java file and a summary.
   - Tests: `SourceInventoryTest` +2 (role classification with multi-module, "mainly", non-Java; first-match rule for nested fixtures).
 
+- Phase 2 Slice 2A (2026-09-23), implemented and tests pass, developer verification pending:
+  - Renamed `SourceRole` → `SourceScope` (field `role` → `scope`) to match schema `source_scope` / API `sourceScope`.
+  - `pom.xml`: `com.github.javaparser:javaparser-core:3.28.2` (compile scope; core only, no symbol solver).
+  - `engine/JavaSourceParser`: own `JavaParser` instance (no StaticJavaParser), language level JAVA_21, UTF-8. Any problem → PARSE_FAILED (recovered partial trees are discarded). Rejects compact/unnamed classes (Java 21 preview, accepted by JavaParser at JAVA_21) as UNSUPPORTED_SYNTAX.
+  - `engine/ParseOutcome` (final class; tree only via `Optional<CompilationUnit> syntaxTree()`), `ParseStatus` (PARSED, PARSE_FAILED, SKIPPED), `ParseDiagnostic` (code, nullable line/column; never the parser message), `DiagnosticCode` (SYNTAX_ERROR, UNSUPPORTED_SYNTAX). Max 10 diagnostics kept, total counted.
+  - `dev.codepulse.ParseMain`: developer harness, prints status/diagnostics and optional `--tree` (YamlPrinter).
+  - Fixtures `src/test/resources/fixtures/parse/`: Java21Features, MissingBrace, UnnamedClass, UnnamedVariable. `JavaSourceParserTest` 7 tests.
+
 ## Commands and observed results
 - 2026-09-23 `java -version` → OpenJDK 21.0.11 (Homebrew). `mvn -version` → Apache Maven 3.9.16. Toolchain ready for Phase 0.
 - 2026-09-23 `git init -b main` → empty repository created; no commits.
@@ -66,7 +74,14 @@ Last working commit: 0bcf965 feat(engine): count physical lines with bounded rea
 - 2026-09-23 `./mvnw -B test` (Slice 1C, after fix) → BUILD SUCCESS, `Tests run: 32, Failures: 0, Errors: 0, Skipped: 0`.
 - 2026-09-23 `InventoryMain .` → `java files: 16 (MAIN 12, TEST 4, OTHER_SOURCE 0)`, `other files: 4`, `excluded files: 30`.
 
+- 2026-09-23 Maven Central metadata: javaparser-core release 3.28.2 (matches spec). JAR exposes LanguageLevel JAVA_21..JAVA_25.
+- 2026-09-23 Scratch probe at JAVA_21: valid record/sealed/switch-pattern/text-block → successful; missing brace → unsuccessful but result present (recovered tree); `int _` → rejected ("reserved keyword"); string template → lexical error with no location; unnamed class `void main(){}` → ACCEPTED (name `$COMPACT_CLASS`, `isCompact()` true); empty → successful.
+- 2026-09-23 `./mvnw -B test` after SourceRole→SourceScope rename → 32/32 pass.
+- 2026-09-23 `./mvnw -B test` (Slice 2A) → BUILD SUCCESS, 39 tests. Review found the diagnostic-cap test was vacuous (input produced 1 problem, verified with ParseMain); replaced with 15 `int _` lines → 15 problems, 10 kept; still 39/39 pass.
+- 2026-09-23 `ParseMain` on fixtures: MissingBrace → PARSE_FAILED SYNTAX_ERROR line 8 col 5; UnnamedClass → PARSE_FAILED UNSUPPORTED_SYNTAX line 3 col 1; SourceWorkspace.java `--tree` → PARSED, YAML tree printed.
+
 ## Known failures or limitations
+- Slice 2A: parser output is not yet connected to inventory (no per-file PARSED/PARSE_FAILED in InventoryResult); strict UTF-8 decoding of analyzed files is not implemented yet (harness uses Files.readString on trusted files). Other Java 21 preview features besides unnamed classes/variables and string templates are not individually tested. All JavaParser problems map to SYNTAX_ERROR, including preview features its validator rejects.
 - Slice 1A: symlinks are skipped without being counted; the spec's workspace rules (Phase 7) reject them at extraction. UTF-8 validity is not checked in inventory (deferred to parsing, Phase 2). The 256 KiB cap applies only to .java files; the Blueprint's archive-level caps arrive with acquisition in Phase 7.
 - Slice 1A walks into excluded directories and counts their files instead of skipping the subtree; fine for bounded workspaces, revisit if scans get slow.
 - No application code exists. Nothing in this repository runs yet.
@@ -74,6 +89,7 @@ Last working commit: 0bcf965 feat(engine): count physical lines with bounded rea
 
 ## Concepts I can explain without assistance
 - (developer fills this in; the learning gate is what the developer can explain, not what Claude generated)
+- 2026-09-23 Phase 1: inventory lists files vs analysis opens them; try-with-resources calls close() even on error; null = not measured; interface lets a new workspace plug in with zero changes to SourceInventory; role rule (src/main → MAIN, src/test → TEST, else OTHER_SOURCE).
 - 2026-09-23 confirmed in gate answers: .java → javac → .class bytecode → JVM runs it; editing source has no effect until recompiled; a HashSet key mutated after insertion is searched in the wrong bucket and is lost.
 - Candidates from Slice B: JDK vs JVM vs bytecode; Maven lifecycle phases (compile → test-compile → test); what a record generates; `List<FileMetrics>` and `Map<String, Set<String>>`; why `TreeMap`/`TreeSet` give deterministic output; defensive copy with `List.copyOf`; `Set.add` returning false.
 
@@ -91,9 +107,19 @@ Last working commit: 0bcf965 feat(engine): count physical lines with bounded rea
 - 2026-09-23 Size-limit violation throws checked `FileSizeLimitExceededException` and fails the whole scan (Blueprint 11.3 "reject run"), not a per-file skip.
 - 2026-09-23 Role classification matches `src/main` / `src/test` anywhere in the path (first occurrence wins), not only at the repository root. Reason: multi-module Maven repos (`module/src/main/java`) are common on GitHub. Alternative: root-anchored only, as Blueprint 9.2 literally reads (rejected: would label most multi-module code OTHER_SOURCE). Custom source roots remain V1.
 - 2026-09-23 `SourceWorkspace` exposes only `Path root()`. Cleanup/close for temporary workspaces is deliberately not added until Phase 7 needs it.
+- 2026-09-23 RENAMED `SourceRole` → `SourceScope` (Spec conflict: schema `source_scope`, API `sourceScope`). Resolved in favor of the spec before persistence exists.
+- 2026-09-23 Compact/unnamed classes rejected by our own check because JavaParser 3.28.2 accepts them at JAVA_21 although they were a Java 21 preview (JEP 445). Blueprint 9.4: unsupported constructs must fail visibly.
+- 2026-09-23 Parse diagnostics store code + line/column only; at most 10 per file with a total count (cap is my choice; Blueprint 9.1 only requires sanitizing).
 - 2026-09-23 Inventory uses `Files.walk` + try-with-resources (teaches resource closing, the Phase 1 gate). Alternative `Files.walkFileTree` with SKIP_SUBTREE avoids descending into excluded folders; deferred.
 
-## Current learning gate (Phase 1)
+## Current learning gate (Phase 2)
+- Developer must: manually predict metrics for a new ~20-line fixture, explain every complexity increment, distinguish unsupported/failed data from zero; interview: how parsing differs from compilation.
+
+- 2026-09-23 Slice 2A answers: predictions 1 (undefined `hello`) PARSED and 3 (empty) PARSED correct; 2 (missing `}`) predicted PARSED, actually PARSE_FAILED (verified with ParseMain). Said "parsing does not check grammar" (backwards: it checks grammar, not meaning). Tokens vs tree: correct. Why discard recovered tree: did not know; re-taught. Why parsing is safe: correct (running could delete files/steal secrets).
+
+- 2026-09-23 Grammar-vs-meaning check: answered "parsed"; `int y = 5 }` (missing `;`) is actually PARSE_FAILED at col 32, `new Banana()` (undefined type) PARSED. Why discard half-tree: "if something is missing we can't move further, tree stops" — partially right; missing the point that metrics from a partial tree would be wrong but look real. Concept still shaky; revisit with the first 2B fixture (a broken file must give no counts, not smaller counts).
+
+## Current learning gate (Phase 1, passed 2026-09-23)
 - Developer must explain: what inventory counts vs what Java analysis does; why Files.walk is closed (try-with-resources, OS handles, even on exception); how paths are normalized and exclusions applied; when to use a checked exception.
 
 - 2026-09-23 first attempt at Slice 1A questions:
@@ -108,6 +134,9 @@ Last working commit: 0bcf965 feat(engine): count physical lines with bounded rea
   - null vs 0: correct (not measured, so null).
   - What changes in SourceInventory in Phase 7: not yet understood (answered about testability). Correct answer: nothing changes; the new workspace implements SourceWorkspace. Re-taught in session.
   - Role prediction (FooTest / app Foo / scripts Build): not answered.
+  - Developer said they did not know Q3 or the role prediction. Re-taught with a PowerSource/Battery/SolarPanel interface demo and a step-by-step walk through the role rule. Gate still open.
+  - Retry with choices: Q3 = b (zero lines change; new workspace plugs into the interface) correct; `app/src/main/java/Foo.java` = MAIN correct; `scripts/Build.java` = OTHER_SOURCE correct.
+  - Phase 1 gate status: MET on 2026-09-23 (privacy reason for relative paths was taught, not independently stated).
 - 2026-09-23 Slice 1B prediction answered correctly: `hi\r\n\r\n` = 2, `\r\n` = 1, `a\nb` = 2.
 
 ## Current learning gate (Phase 0, passed)
@@ -121,8 +150,7 @@ Last working commit: 0bcf965 feat(engine): count physical lines with bounded rea
   - Gate status: MET for the concept questions on 2026-09-23. Failures vs Errors was corrected in teaching; revisit briefly in Phase 1 when the first test fails.
 
 ## Next smallest slice
-- Phase 1 checkpoint: developer verifies `./mvnw test` and `InventoryMain .`, answers the Phase 1 gate (including the still-open question on why paths are stored relative), then commits Slice 1C.
-- After the gate: Phase 2, slice 1 — add a verified, pinned JavaParser core dependency and parse ONE fixture file into an AST (success vs PARSE_FAILED). Concept lesson first: AST vs tokens vs text.
+- Slice 2B: enumerate declarations from a PARSED tree with a dedicated visitor: classCount (incl. nested/local, excluding interfaces and anonymous), interfaceCount, enumCount, recordCount, annotationCount, anonymousClassCount, methodCount (explicit incl. abstract/interface), constructorCount (explicit incl. compact record constructors), executableCount. Concept lesson first: visitors, recursion, explicit vs implicit declarations.
 
 ## Suggested commit
 - None pending.

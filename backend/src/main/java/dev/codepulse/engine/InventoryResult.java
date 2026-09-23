@@ -38,11 +38,11 @@ public record InventoryResult(List<SourceFile> files, int excludedFileCount) {
         return files.size() - javaFileCount();
     }
 
-    /** @return number of included .java files with the given role */
-    public int javaFileCount(SourceRole role) {
+    /** @return number of included .java files with the given scope */
+    public int javaFileCount(SourceScope scope) {
         int count = 0;
         for (SourceFile file : files) {
-            if (file.role() == role) {
+            if (file.scope() == scope) {
                 count++;
             }
         }

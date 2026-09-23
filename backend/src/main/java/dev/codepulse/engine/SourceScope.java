@@ -1,12 +1,13 @@
 package dev.codepulse.engine;
 
 /**
- * What kind of source a Java file is (Blueprint 9.2).
+ * What kind of source a Java file is (Blueprint 9.2; named {@code source_scope} in the schema
+ * and {@code sourceScope} in the API contract).
  *
  * <p>An enum is a fixed list of named values. The compiler rejects anything else, so a typo like
  * "MIAN" cannot sneak in the way it could with a plain String.
  */
-public enum SourceRole {
+public enum SourceScope {
     /** Production code: a path under {@code src/main/}. */
     MAIN,
     /** Test code: a path under {@code src/test/}. Shown separately so tests do not dilute results. */
@@ -19,7 +20,7 @@ public enum SourceRole {
      * multi-module projects like {@code billing/src/main/java/A.java} are MAIN too.
      * Only directory segments are checked, never the file name, and names must match exactly.
      */
-    static SourceRole classify(String relativePath) {
+    static SourceScope classify(String relativePath) {
         String[] segments = relativePath.split("/");
         int directorySegments = segments.length - 1;
         for (int i = 0; i + 1 < directorySegments; i++) {

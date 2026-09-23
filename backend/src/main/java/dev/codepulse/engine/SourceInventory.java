@@ -24,7 +24,7 @@ import java.util.stream.Stream;
  *   <li>Output is sorted, because the filesystem returns files in no guaranteed order.</li>
  *   <li>Symbolic links are never followed and never listed.</li>
  *   <li>Files inside an excluded directory are counted, not silently dropped.</li>
- *   <li>{@code .java} files get a physical line count and a {@link SourceRole}; a Java file above
+ *   <li>{@code .java} files get a physical line count and a {@link SourceScope}; a Java file above
  *       the size limit stops the scan.</li>
  * </ul>
  */
@@ -118,7 +118,7 @@ public final class SourceInventory {
         }
         // ... and the counter enforces the limit again on the bytes it actually reads.
         int lines = lineCounter.count(path, relativePath, maxJavaFileBytes);
-        return new SourceFile(relativePath, size, lines, SourceRole.classify(relativePath));
+        return new SourceFile(relativePath, size, lines, SourceScope.classify(relativePath));
     }
 
     /** True if any directory segment (not the file name itself) is an excluded name. */

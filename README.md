@@ -2,20 +2,24 @@
 
 A Java-focused, explainable codebase analyzer. It analyzes small Java repositories and produces deterministic structural reports (files, types, methods, complexity, explicit internal import relationships, parse coverage, and review-priority signals with evidence) to help developers prioritize code review.
 
-**Status: Phase 0 in progress (environment and Java bridge). Nothing runs yet.**
+**Status: Phase 2 in progress (AST metrics). Local, plain-Java engine only; no web app yet.**
 
 This repository currently contains the specification pack and repository scaffolding only. There is no implemented application, no deployment, and no benchmark. Features are listed here only when they exist and have been verified.
 
 ## What is implemented
 
-- Phase 0 learning bridge only: a plain Java 21 Maven module in [backend/](backend/) with a `FileMetrics` record, a package grouping summary, and 7 JUnit tests. It analyzes nothing yet; the values are hand-written. See [docs/implementation-state.md](docs/implementation-state.md) for the current slice.
+- Phase 0 learning bridge: `FileMetrics` record and a package summary (hand-written data).
+- Phase 1 source inventory: lists files under a trusted local folder, skips and counts excluded directories (`target`, `.git`, `node_modules`, ...), never follows symlinks, counts physical lines of `.java` files with a 256 KiB per-file limit, and labels Java files MAIN / TEST / OTHER_SOURCE.
+- Phase 2 (in progress): parses one Java 21 file with JavaParser 3.28.2 into PARSED or PARSE_FAILED with sanitized diagnostics. No metrics from the tree yet.
+
+See [docs/implementation-state.md](docs/implementation-state.md) for the current slice.
 
 Build and run it:
 
 ```
 cd backend
 ./mvnw test
-java -cp target/classes dev.codepulse.Phase0Main
+java -cp target/classes dev.codepulse.InventoryMain .
 ```
 
 ## Roadmap (planned, not implemented)
