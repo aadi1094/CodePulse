@@ -1,0 +1,31 @@
+# Secrets and local environment (see Blueprint 17: only .env.example is committed)
+.env
+.env.*
+!.env.example
+
+# Maven build output
+backend/target/
+**/target/
+
+# Frontend (Phase 9)
+node_modules/
+frontend/dist/
+
+# IDE and OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Logs and temporary analysis workspaces
+*.log
+logs/
+workspaces/
+tmp/
+
+# Local exports and database volumes (Phase 9/10)
+exports/
+pgdata/
+
+# Maven Wrapper: keep the wrapper jar/properties if the wrapper mode uses them.
+# A broad *.jar ignore is deliberately NOT used here (Blueprint 17).
