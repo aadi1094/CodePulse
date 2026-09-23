@@ -10,7 +10,7 @@ Goal of Phase 2:
 Slices (from the playbook):
   2A  Parse one file: PARSED or PARSE_FAILED                   <- DONE
   2B  Find declarations: classes, interfaces, records, methods...  <- DONE
-  2C  Token-based source lines (ncloc) and comment lines
+  2C  Token-based source lines (ncloc) and comment lines       <- DONE
   2D  Comments: TODO / FIXME markers
   2E  Method line ranges
   2F  Complexity (the 5-point example)
@@ -294,3 +294,98 @@ STEP 4  java -cp "$CP" dev.codepulse.ParseMain src/test/resources/fixtures/decla
         Compare with the hand tally at the bottom of the fixture file.
 STEP 5  Try it on any file in the project, e.g. PackageSummary.java,
         and count its methods yourself first.
+
+
+==============================================================================
+ SLICE 2C - COUNTING CODE LINES, COMMENT LINES, BLANK LINES
+==============================================================================
+
+Three numbers per file (Blueprint 9.3):
+
+  ncloc         lines with REAL CODE ("non-comment lines of code")
+  commentLines  lines that contain a comment
+  blankLines    lines with nothing, or only spaces/tabs
+
+They can OVERLAP, so they do not always add up to the total:
+
+  7   String url = "http://example.com"; // a comment
+      -> code AND comment. Counted once in ncloc, once in commentLines.
+
+------------------------------------------------------------------------------
+ BIG IDEA - WHY TOKENS, NOT TEXT SEARCH
+------------------------------------------------------------------------------
+
+Text search for "//" would think this line has a comment:
+    String url = "http://example.com";
+But "http://example.com" is ONE token: a LITERAL (a string).
+The "//" is inside it, so it is NOT a comment.
+
+JavaParser labels every token with a category:
+    KEYWORD     class, int, return
+    IDENTIFIER  url, Mixed, count
+    LITERAL     "http://...", 1, a text block
+    SEPARATOR   { } ( ) ;
+    OPERATOR    = + &&
+    COMMENT     // ... , /* ... */ , /** ... */
+    WHITESPACE / EOL   spaces and line breaks (ignored)
+
+Each token knows its begin line and end line. So:
+    ncloc        = number of DIFFERENT lines touched by code tokens
+    commentLines = number of DIFFERENT lines touched by comment tokens
+
+"DIFFERENT lines" -> we put line numbers into a Set.
+A Set ignores duplicates (Phase 0 lesson!), so a line with 5 tokens
+is still counted once.
+
+------------------------------------------------------------------------------
+ THE FIXTURE, LINE BY LINE (Mixed.java)
+------------------------------------------------------------------------------
+
+   1 package fixtures.lines;                 code
+   2                                         blank
+   3 /**                                     comment
+   4  * Javadoc is a comment.                comment
+   5  */                                     comment
+   6 class Mixed {                           code
+   7     String url = "http://..."; // ...   code + comment
+   8     /* block comment                    comment
+   9                                         comment + blank
+  10        still the comment */ int ...     comment + code
+  11                                         blank
+  12     String text = """                   code
+  13         first                           code (inside text block)
+  14                                         code + blank
+  15         """;                            code
+  16 }                                       code
+
+  ncloc 9, comment 7, blank 4
+
+Surprises to remember:
+  - Line 9 is empty but INSIDE a /* */ comment: comment AND blank.
+  - Line 14 is empty but INSIDE a text block: code AND blank.
+    (a text block is one LITERAL token covering lines 12-15)
+  - Blank is measured on the plain text; the Blueprint says blank
+    lines are "separate from token metrics".
+
+------------------------------------------------------------------------------
+ MUTATION CHECK (real run)
+------------------------------------------------------------------------------
+
+Removed the line that treats \r\n as ONE line break ->
+  expected blankLines=1 but was blankLines=4   (1 test failed)
+Restored -> 52/52 pass. The Windows line-ending test really protects us.
+
+------------------------------------------------------------------------------
+ HOW TO TEST SLICE 2C
+------------------------------------------------------------------------------
+
+STEP 1  cd ~/Desktop/CodePulse/backend
+STEP 2  ./mvnw test
+        Expect: Tests run: 52, Failures: 0, Errors: 0   BUILD SUCCESS
+STEP 3  CP="target/classes:$(cat target/classpath.txt)"
+STEP 4  java -cp "$CP" dev.codepulse.ParseMain src/test/resources/fixtures/lines/Mixed.java
+        New last line:
+          lines:   ncloc 9, comment 7, blank 4
+STEP 5  Check blank lines another way (Mac tool):
+          grep -cE '^[[:space:]]*$' src/main/java/dev/codepulse/engine/SourceScope.java
+        It prints 2, same as ParseMain's "blank 2" for that file.

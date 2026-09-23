@@ -1,7 +1,7 @@
 # Implementation state
 Current phase: 2
-Current slice: 2C — token-based line metrics (in progress).
-Last working commit: 449745c feat(engine): parse Java 21 source with JavaParser into sanitized outcomes (pushed).
+Current slice: 2D — TODO/FIXME markers in comment tokens (in progress).
+Last working commit: fab83f4 feat(engine): count declarations with a dedicated AST visitor (pushed).
 
 ## Implemented and personally verified
 - Slice A (2026-09-23): spec pack moved to `docs/spec/`, links fixed, git initialized on `main`, ignore policy, README. Verified by Claude; developer verification pending.
@@ -54,6 +54,12 @@ Last working commit: 449745c feat(engine): parse Java 21 source with JavaParser 
   - Fixtures `fixtures/declarations/Declarations.java` (hand tally in comments) and `ImplicitMembers.java`. `DeclarationCounterTest` 6 tests incl. broken file → no counts.
   - `ParseMain` prints declaration counts for PARSED files.
 
+- Phase 2 Slice 2C (2026-09-23), implemented and tests pass, developer verification pending:
+  - `engine/LineMetrics` record (ncloc, commentLines, blankLines).
+  - `engine/LineMetricsCalculator.calculate(tree, sourceText)`: ncloc/commentLines = distinct lines covered by code-category tokens (KEYWORD, IDENTIFIER, LITERAL, SEPARATOR, OPERATOR) / COMMENT tokens, using token begin..end lines; blankLines from raw text (space/tab/form feed only), same line-break rules as PhysicalLineCounter.
+  - Fixture `fixtures/lines/Mixed.java`; `LineMetricsCalculatorTest` 7 tests with a line-by-line hand count.
+  - `ParseMain` prints line metrics.
+
 ## Commands and observed results
 - 2026-09-23 `java -version` → OpenJDK 21.0.11 (Homebrew). `mvn -version` → Apache Maven 3.9.16. Toolchain ready for Phase 0.
 - 2026-09-23 `git init -b main` → empty repository created; no commits.
@@ -91,6 +97,12 @@ Last working commit: 449745c feat(engine): parse Java 21 source with JavaParser 
 - 2026-09-23 Mutation check: removed `super.visit` in `visit(ClassOrInterfaceDeclaration)` → 3 DeclarationCounterTest failures (e.g. method expected 10 was 0); restored → 45/45 pass.
 - 2026-09-23 `ParseMain` on Declarations.java → class 2, interface 1, enum 1, record 1, annotation 1, anonymous 1, method 10, constructor 3, executable 11, lambda 2 (matches hand tally); ImplicitMembers.java → class 1, enum 1, record 1, all members 0; DeclarationCounter.java → method 10, constructor 1, executable 11.
 
+- 2026-09-23 `git commit` + `git push`: fab83f4 Slice 2B.
+- 2026-09-23 Token probe (JavaParser 3.28.2): categories KEYWORD/IDENTIFIER/LITERAL/SEPARATOR/OPERATOR/COMMENT/EOL/WHITESPACE_NO_EOL; `"http://x"` is LITERAL; block comment and text block tokens span multiple lines; lone `\r` advances the line number.
+- 2026-09-23 `./mvnw -B test` (Slice 2C) → BUILD SUCCESS, `Tests run: 52, Failures: 0, Errors: 0`.
+- 2026-09-23 Mutation check: removed CRLF skip in countBlankLines → `windowsAndOldMacLineEndingsGiveTheSameCounts` failed (blank expected 1 was 4); restored → 52/52.
+- 2026-09-23 `ParseMain` Mixed.java → ncloc 9, comment 7, blank 4 (hand count); SourceScope.java → ncloc 21, comment 15, blank 2; `grep -cE '^[[:space:]]*$'` also 2; 21+15+2 = `wc -l` 38.
+
 ## Known failures or limitations
 - Slice 2A: parser output is not yet connected to inventory (no per-file PARSED/PARSE_FAILED in InventoryResult); strict UTF-8 decoding of analyzed files is not implemented yet (harness uses Files.readString on trusted files). Other Java 21 preview features besides unnamed classes/variables and string templates are not individually tested. All JavaParser problems map to SYNTAX_ERROR, including preview features its validator rejects.
 - Slice 1A: symlinks are skipped without being counted; the spec's workspace rules (Phase 7) reject them at extraction. UTF-8 validity is not checked in inventory (deferred to parsing, Phase 2). The 256 KiB cap applies only to .java files; the Blueprint's archive-level caps arrive with acquisition in Phase 7.
@@ -122,6 +134,7 @@ Last working commit: 449745c feat(engine): parse Java 21 source with JavaParser 
 - 2026-09-23 Compact/unnamed classes rejected by our own check because JavaParser 3.28.2 accepts them at JAVA_21 although they were a Java 21 preview (JEP 445). Blueprint 9.4: unsupported constructs must fail visibly.
 - 2026-09-23 Parse diagnostics store code + line/column only; at most 10 per file with a total count (cap is my choice; Blueprint 9.1 only requires sanitizing).
 - 2026-09-23 Declaration counting choices where Blueprint 9.3 is silent: annotation members (`String value();` in `@interface`) are not methods; methods inside enum constant bodies, local classes, and anonymous classes count toward the file's methodCount; enum constant bodies are not anonymous classes (only `new X() { }` object creations are); lambdas are counted but never executables.
+- 2026-09-23 blankLines follows Blueprint 9.3 literally ("lines containing only whitespace; separate from token metrics"): measured on raw text, so empty lines inside block comments or text blocks are blank AND comment/code. Whitespace = space, tab, form feed (JLS 3.6).
 - 2026-09-23 Inventory uses `Files.walk` + try-with-resources (teaches resource closing, the Phase 1 gate). Alternative `Files.walkFileTree` with SKIP_SUBTREE avoids descending into excluded folders; deferred.
 
 ## Current learning gate (Phase 2)
@@ -132,6 +145,8 @@ Last working commit: 449745c feat(engine): parse Java 21 source with JavaParser 
 - 2026-09-23 Grammar-vs-meaning check: answered "parsed"; `int y = 5 }` (missing `;`) is actually PARSE_FAILED at col 32, `new Banana()` (undefined type) PARSED. Why discard half-tree: "if something is missing we can't move further, tree stops" — partially right; missing the point that metrics from a partial tree would be wrong but look real. Concept still shaky; revisit with the first 2B fixture (a broken file must give no counts, not smaller counts).
 
 - 2026-09-23 Slice 2B prediction (Shape interface + Circle record): interface 1, record 1, method 3, constructor 0 all correct (verified with ParseMain); executable (2) not answered. Understanding answers: (1) missing super.visit → "runs the code in the same loop" (wrong: the walk stops, children are never visited); (2) record 0 methods → "because there is break" (wrong: the methods are implicit, generated by Java, and only written ones count); (3) abstract not executable → "because of ; semicolon" (correct: no body). Re-taught 1 and 2; multiple-choice retry: both correct (b, b).
+
+- 2026-09-23 Slice 2C prediction: ncloc 2 (actual 3, missed a code line), comment 2 and blank 1 correct (verified with ParseMain). Q1 string literal not a comment: correct. Q2 Set avoids duplicates: correct. Q3 code+comment line: "because of //" — partially right (code first, then a // comment on the same line).
 
 ## Current learning gate (Phase 1, passed 2026-09-23)
 - Developer must explain: what inventory counts vs what Java analysis does; why Files.walk is closed (try-with-resources, OS handles, even on exception); how paths are normalized and exclusions applied; when to use a checked exception.
@@ -164,7 +179,7 @@ Last working commit: 449745c feat(engine): parse Java 21 source with JavaParser 
   - Gate status: MET for the concept questions on 2026-09-23. Failures vs Errors was corrected in teaching; revisit briefly in Phase 1 when the first test fails.
 
 ## Next smallest slice
-- Slice 2C: token-based line metrics from the parsed tree's tokens: ncloc (distinct lines covered by non-whitespace, non-comment tokens), commentLines (lines intersected by comment tokens), blankLines (whitespace-only lines). Text blocks count as source on every line they span; `//` inside strings is not a comment. Concept lesson first: tokens and token ranges.
+- Slice 2D: TODO/FIXME counts — case-insensitive whole-word markers inside comment tokens only, counting occurrences not lines (Blueprint 9.3/9.5). Small slice; regex is allowed inside an already-identified comment.
 
 ## Suggested commit
 - None pending.

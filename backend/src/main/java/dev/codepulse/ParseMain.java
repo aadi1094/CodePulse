@@ -4,6 +4,8 @@ import com.github.javaparser.printer.YamlPrinter;
 import dev.codepulse.engine.DeclarationCounter;
 import dev.codepulse.engine.DeclarationCounts;
 import dev.codepulse.engine.JavaSourceParser;
+import dev.codepulse.engine.LineMetrics;
+import dev.codepulse.engine.LineMetricsCalculator;
 import dev.codepulse.engine.ParseDiagnostic;
 import dev.codepulse.engine.ParseOutcome;
 
@@ -43,6 +45,9 @@ public final class ParseMain {
                 + ", annotation " + c.annotationCount() + ", anonymous " + c.anonymousClassCount());
             System.out.println("members: method " + c.methodCount() + ", constructor " + c.constructorCount()
                 + ", executable " + c.executableCount() + ", lambda " + c.lambdaCount());
+            LineMetrics lines = LineMetricsCalculator.calculate(tree, source);
+            System.out.println("lines:   ncloc " + lines.ncloc() + ", comment " + lines.commentLines()
+                + ", blank " + lines.blankLines());
         });
 
         boolean showTree = args.length > 1 && args[1].equals("--tree");
