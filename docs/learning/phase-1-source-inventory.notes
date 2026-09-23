@@ -1,0 +1,138 @@
+==============================================================================
+ PHASE 1 NOTES - SOURCE INVENTORY  (simple language)
+==============================================================================
+
+Goal of Phase 1:
+  Teach CodePulse to LOOK at a folder and LIST the files in it.
+  It does NOT read Java code yet. Like taking attendance before class:
+  "who is here, and how big are they?"
+
+Why a separate step?
+  Later (Phase 7) the folder will come from a GitHub download. Later
+  still (Phase 2) we will parse the Java files. Keeping "find the files"
+  apart from "understand the files" means each part can be tested alone.
+
+Slices:
+  1A  Walk a folder, skip junk folders, sorted list with sizes   <- DONE
+  1B  Count lines safely (size cap, Windows line endings)
+  1C  Label files MAIN / TEST / OTHER, add the workspace interface
+
+
+------------------------------------------------------------------------------
+ SLICE 1A - NEW IDEAS
+------------------------------------------------------------------------------
+
+1. Path  = an ADDRESS of a file or folder. Just the address, not the file.
+     Path p = Path.of("src/main/java/App.java");
+   Creating a Path does not touch the disk. The file might not even exist.
+
+2. Files = a toolbox of static methods that DO touch the disk.
+     Files.exists(p)      is it there?
+     Files.size(p)        how many bytes?
+     Files.isRegularFile  a normal file (not a folder, not a shortcut)?
+     Files.walk(folder)   visit everything inside, all levels deep
+
+3. try-with-resources = "always close the door, even if you trip".
+     try (Stream<Path> paths = Files.walk(base)) {
+         ... use paths ...
+     }   <- Java calls paths.close() HERE, always.
+   Files.walk borrows "directory handles" from the operating system.
+   The OS only has a limited number to lend. If you forget to return
+   them, a long-running server eventually cannot open any file at all.
+   try-with-resources returns them even when an exception happens in
+   the middle. That is the Phase 1 gate question.
+
+4. Checked exceptions (IOException).
+   Disk work can fail for reasons outside your code: folder deleted,
+   no permission. Java FORCES you to either handle IOException or
+   write "throws IOException" on the method. That is why scan() says
+   "throws IOException".
+   Side effect: a lambda inside forEach(...) is not allowed to throw a
+   checked exception. So SourceInventory uses a plain while-loop with
+   an Iterator instead. Simple and honest.
+
+5. UncheckedIOException.
+   The stream's iterator cannot throw IOException, so Java wraps it
+   in UncheckedIOException. We catch it and throw the real one inside
+   ("unwrap"), so callers see the true cause.
+
+6. Symbolic links (shortcuts).
+   A symlink is a file that POINTS somewhere else, maybe outside the
+   folder, maybe at /etc/passwd. An analyzer that follows links could
+   be tricked into reading files it should never see. So we use
+   LinkOption.NOFOLLOW_LINKS and never list or follow them.
+
+7. Relative POSIX paths.
+   Mac says  src/main/App.java   Windows says  src\main\App.java
+   We always store "src/main/App.java" relative to the scanned folder.
+   Same text on every computer = same report. And we never store the
+   full server path like /Users/aditya/..., which would leak private
+   details.
+
+8. Sorting with a Comparator.
+     files.sort(Comparator.comparing(SourceFile::relativePath));
+   "Sort files by their relativePath." Files.walk returns files in
+   whatever order the disk likes, so we always sort afterwards.
+   Note: uppercase comes before lowercase ("Target" < "builder").
+
+9. Excluded folders are COUNTED, not hidden.
+   .git, node_modules, vendor, target, build, generated, generated-sources
+   Files inside them go into excludedFileCount. Honest reports never
+   let things quietly disappear.
+
+10. @TempDir (JUnit).
+   JUnit gives each test a fresh empty folder and deletes it after.
+   Tests build tiny fake projects there. Your real files are never
+   touched.
+
+
+------------------------------------------------------------------------------
+ SLICE 1A - HOW IT FLOWS
+------------------------------------------------------------------------------
+
+  scan(root)
+    -> make root absolute and clean       ( /.../backend )
+    -> missing?  throw NoSuchFileException
+    -> not a folder or a symlink?  throw NotDirectoryException
+    -> open Files.walk inside try-with-resources
+         for each path:
+           not a regular file?           skip (folders, symlinks)
+           inside an excluded folder?    excluded++ , skip
+           otherwise                     add SourceFile(path, size)
+    -> stream closed automatically
+    -> sort by path
+    -> return InventoryResult(files, excludedCount)
+
+
+------------------------------------------------------------------------------
+ HOW TO TEST SLICE 1A, STEP BY STEP
+------------------------------------------------------------------------------
+
+STEP 1  cd ~/Desktop/CodePulse/backend
+STEP 2  ./mvnw test
+        Expect:  Tests run: 15, Failures: 0, Errors: 0   BUILD SUCCESS
+        (8 of those 15 are the new SourceInventoryTest)
+
+STEP 3  Try it on a real folder, the backend project itself:
+          java -cp target/classes dev.codepulse.InventoryMain .
+        Output: one line per file ("path  N bytes"), then
+          included files: 14
+          excluded files: 22
+        The 22 excluded files are the compiled .class files and test
+        reports inside target/. They were found and counted, but kept
+        out of the list, exactly as designed.
+
+STEP 4  Try a folder that does not exist:
+          java -cp target/classes dev.codepulse.InventoryMain nope
+        You get a NoSuchFileException stack trace. Read it top to bottom
+        like in Phase 0.
+
+What each test proves:
+  emptyDirectoryHasNoFiles                      empty folder = empty result
+  listsNestedFilesSortedWithForwardSlashPaths   sorted, uses "/"
+  recordsExactByteSizes                         sizes are exact bytes
+  skipsExcludedDirectoriesButCountsTheirFiles   junk folders counted, not listed
+  excludesOnlyExactDirectoryNames...            "builder" is not "build"
+  doesNotFollowOrListSymbolicLinks              shortcuts ignored (security)
+  rejectsMissingRoot                            missing folder = clear error
+  rejectsRootThatIsAFile                        a file is not a folder
