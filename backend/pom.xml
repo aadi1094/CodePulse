@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!-- Coordinates: how other builds would refer to this artifact. -->
+  <groupId>dev.codepulse</groupId>
+  <artifactId>codepulse-backend</artifactId>
+  <version>0.0.1-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <name>CodePulse backend</name>
+  <description>Phase 0: plain Java 21 learning bridge. Spring Boot is added in Phase 4.</description>
+
+  <properties>
+    <!-- "release" tells javac to compile for exactly this Java version and fail on newer APIs. -->
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+    <!-- Versions verified on Maven Central 2026-09-23. These match what Spring Boot 4.1.1 manages,
+         so Phase 4 will not force a test or plugin rewrite. -->
+    <junit-jupiter.version>6.0.3</junit-jupiter.version>
+    <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
+    <maven-surefire-plugin.version>3.5.6</maven-surefire-plugin.version>
+  </properties>
+
+  <dependencies>
+    <!-- The only dependency in Phase 0. "test" scope: available when compiling and running tests,
+         never packaged into the application jar. -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${junit-jupiter.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- Compiles src/main/java and src/test/java with javac. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>${maven-compiler-plugin.version}</version>
+      </plugin>
+      <!-- Runs the tests during the "test" lifecycle phase. 3.x auto-detects JUnit Platform. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>${maven-surefire-plugin.version}</version>
+      </plugin>
+    </plugins>
+  </build>
+</project>
