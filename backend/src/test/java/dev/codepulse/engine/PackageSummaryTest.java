@@ -42,6 +42,20 @@ class PackageSummaryTest {
     }
 
     @Test
+    void isNotAffectedByLaterChangesToTheInputList() {
+        List<FileMetrics> input = new ArrayList<>();
+        input.add(new FileMetrics("A.java", "p", 1, 0));
+
+        PackageSummary summary = new PackageSummary(input);
+        // The caller keeps mutating their own list after handing it over.
+        input.add(new FileMetrics("B.java", "p", 1, 0));
+        input.clear();
+
+        // The summary copied the list in its constructor, so it still sees exactly one file.
+        assertEquals(Set.of("A.java"), summary.groupByPackage().get("p"));
+    }
+
+    @Test
     void rejectsDuplicateRelativePaths() {
         List<FileMetrics> input = List.of(
             new FileMetrics("A.java", "p", 1, 0),

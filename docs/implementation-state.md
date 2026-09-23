@@ -1,7 +1,7 @@
 # Implementation state
 Current phase: 0
-Current slice: B — Maven project, FileMetrics record, PackageSummary grouping, one JUnit test. Implemented; awaiting developer verification and learning-gate answers.
-Last working commit: none (repository initialized 2026-09-23, nothing committed yet)
+Current slice: C — deliberate exception, debugger trace, collection equality. Implemented and tests pass; Phase 0 learning gate NOT yet confirmed by the developer.
+Last working commit: 037b466 feat(engine): add Java 21 Maven bridge with FileMetrics and package summary (Slice B). Slice C is uncommitted.
 
 ## Implemented and personally verified
 - Slice A (2026-09-23): spec pack moved to `docs/spec/`, links fixed, git initialized on `main`, ignore policy, README. Verified by Claude; developer verification pending.
@@ -12,6 +12,12 @@ Last working commit: none (repository initialized 2026-09-23, nothing committed 
   - `dev.codepulse.engine.PackageSummary`: defensive `List.copyOf`, duplicate-path rejection, `groupByPackage()` → `TreeMap<String, TreeSet<String>>`, `render()` sorted text with plain loops.
   - `dev.codepulse.Phase0Main`: runnable sample (to be deleted in Phase 4).
   - `PackageSummaryTest`: sorted grouping, empty input, duplicate path rejection.
+- Slice C (2026-09-23), implemented and tests pass, developer verification pending:
+  - `Phase0Main --duplicate` deliberately constructs a duplicate path so `PackageSummary` throws `IllegalArgumentException`; uncaught, prints a 4-frame stack trace.
+  - Traced in `jdb`: breakpoint in `rejectDuplicatePaths`, stepped to the throw, inspected `seen` and `m.relativePath()`.
+  - `CollectionEqualityTest`: records deduplicate in a HashSet; a class without equals is identity-only; mutating a key after insertion strands it (`contains`/`remove` false, `size` 1).
+  - `PackageSummaryTest.isNotAffectedByLaterChangesToTheInputList`: defensive copy verified.
+  - `docs/learning/phase-0-java-bridge.md`: concept notes, jdb transcript, VS Code debugger steps.
 
 ## Commands and observed results
 - 2026-09-23 `java -version` → OpenJDK 21.0.11 (Homebrew). `mvn -version` → Apache Maven 3.9.16. Toolchain ready for Phase 0.
@@ -20,6 +26,10 @@ Last working commit: none (repository initialized 2026-09-23, nothing committed 
 - 2026-09-23 `./mvnw -B test` (first run) → BUILD FAILURE after 2m49s: `Could not transfer artifact org.apache.maven.surefire:surefire-providers:pom:3.5.6 ... Can't assign requested address`. Compilation of 3 main + 1 test class had succeeded. Hypothesis: transient socket/network error, not POM. Evidence: `curl` of the artifact URL returned HTTP 200.
 - 2026-09-23 `./mvnw -B test` (retry, no changes) → BUILD SUCCESS. `Tests run: 3, Failures: 0, Errors: 0, Skipped: 0` in `PackageSummaryTest`.
 - 2026-09-23 `java -cp target/classes dev.codepulse.Phase0Main` → printed 3 package blocks sorted: `(default package)`, `dev.codepulse`, `dev.codepulse.engine`, files sorted within each. Exit 0.
+- 2026-09-23 `git commit` ×2 (authorized by developer): eb7de52 chore(repo), 037b466 feat(engine).
+- 2026-09-23 `./mvnw -B test` (Slice C) → BUILD SUCCESS. `CollectionEqualityTest` 3/3, `PackageSummaryTest` 4/4, total `Tests run: 7, Failures: 0, Errors: 0, Skipped: 0`.
+- 2026-09-23 `java -cp target/classes dev.codepulse.Phase0Main --duplicate` → exit 1, `IllegalArgumentException: duplicate relativePath: src/main/java/App.java` with frames rejectDuplicatePaths:37 ← <init>:29 ← failWithDuplicatePath:42 ← main:16.
+- 2026-09-23 `jdb -classpath target/classes -sourcepath src/main/java dev.codepulse.Phase0Main --duplicate` with `stop in ...rejectDuplicatePaths` → breakpoint hit line 33; after stepping, `print seen` = `[src/main/java/App.java]`, `print seen.contains(m.relativePath())` = true, then uncaught exception at line 37.
 
 ## Known failures or limitations
 - No application code exists. Nothing in this repository runs yet.
@@ -36,6 +46,12 @@ Last working commit: none (repository initialized 2026-09-23, nothing committed 
 - 2026-09-23 ADR files in `docs/decisions/` are written when a decision is implemented (starting Phase 4). Blueprint section 23 already records the core decisions and their rationale.
 - 2026-09-23 `docs/architecture/`, `docs/decisions/`, `docs/metrics/`, `docs/learning/` are created when a phase first needs them, not up front.
 
+## Current learning gate (Phase 0)
+- Developer must: run `./mvnw test` themselves; reproduce the breakpoint in VS Code (steps in `docs/learning/phase-0-java-bridge.md`); explain source → bytecode → execution; explain why mutating a HashSet key is dangerous; answer the Slice B prediction and the understanding questions. Not yet done as of 2026-09-23.
+
 ## Next smallest slice
-- Slice C (after B is verified): deliberate exception traced in the IDE debugger (the duplicate-path `IllegalArgumentException` is the candidate: set a breakpoint in `PackageSummary.rejectDuplicatePaths` and inspect `seen`), a `HashSet` mutated-key equality example showing why mutable keys break `contains`, then the Phase 0 checkpoint (learning gate: run the build, explain source→bytecode→execution, explain why mutating a set key is dangerous).
-- Phase 0 exit also requires: developer answers the three understanding questions and the prediction, and can explain class vs object vs interface vs record.
+- Commit Slice C once verified (suggested message in session / below), then tag nothing yet (`v0.1.0` is after Phase 3).
+- Phase 1, slice 1: `SourceInventory` over a trusted temporary fixture directory using `Path`/`Files`, returning a deterministic sorted list of normalized relative paths. Concept lesson first: NIO paths, try-with-resources, checked exceptions.
+
+## Suggested commit (Slice C, not yet run)
+- `feat(engine): add equality, defensive-copy, and debugger practice for Phase 0`

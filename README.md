@@ -8,7 +8,15 @@ This repository currently contains the specification pack and repository scaffol
 
 ## What is implemented
 
-- Nothing yet. See [docs/implementation-state.md](docs/implementation-state.md) for the current slice.
+- Phase 0 learning bridge only: a plain Java 21 Maven module in [backend/](backend/) with a `FileMetrics` record, a package grouping summary, and 7 JUnit tests. It analyzes nothing yet; the values are hand-written. See [docs/implementation-state.md](docs/implementation-state.md) for the current slice.
+
+Build and run it:
+
+```
+cd backend
+./mvnw test
+java -cp target/classes dev.codepulse.Phase0Main
+```
 
 ## Roadmap (planned, not implemented)
 
