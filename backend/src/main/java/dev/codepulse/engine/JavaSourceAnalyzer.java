@@ -25,6 +25,7 @@ import java.util.List;
  * <pre>
  * workspace -> inventory -> for each .java file (in path order):
  *     bounded read -> SHA-256 -> strict UTF-8 -> parse -> measure (only if PARSED)
+ *   then: index declared types -> build explicit import graph
  * </pre>
  *
  * <p>One file is processed at a time and its syntax tree is dropped as soon as its numbers are
@@ -60,7 +61,8 @@ public final class JavaSourceAnalyzer {
                 javaFiles.add(analyzeFile(workspace.root(), file));
             }
         }
-        return new AnalysisResult(files, javaFiles);
+        // Linking step (Blueprint 9.1): needs every file's declared types, so it runs after the loop.
+        return new AnalysisResult(files, javaFiles, ImportGraphBuilder.build(javaFiles));
     }
 
     private JavaFileAnalysis analyzeFile(Path root, SourceFile file) throws IOException {
@@ -80,6 +82,8 @@ public final class JavaSourceAnalyzer {
         CompilationUnit tree = outcome.syntaxTree().get();
         String packageName = tree.getPackageDeclaration().map(PackageDeclaration::getNameAsString).orElse("");
         return JavaFileAnalysis.parsed(file, sha256, packageName,
+            ImportCollector.declaredTypeNames(tree),
+            ImportCollector.imports(tree),
             DeclarationCounter.countIn(tree),
             LineMetricsCalculator.calculate(tree, text),
             CommentMarkerCounter.count(tree),

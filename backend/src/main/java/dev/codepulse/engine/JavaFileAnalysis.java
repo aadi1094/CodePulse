@@ -20,6 +20,8 @@ import java.util.Objects;
  * @param parseStatus         PARSED or PARSE_FAILED
  * @param diagnostics         sanitized problems; empty when PARSED
  * @param packageName         declared package, "" for the default package; null if not parsed
+ * @param declaredTypeNames   fully qualified top-level type names, in source order; empty if not parsed
+ * @param imports             every import declaration as written; empty if not parsed
  * @param declarations        null if not parsed
  * @param lines               null if not parsed
  * @param markers             null if not parsed
@@ -35,6 +37,8 @@ public record JavaFileAnalysis(
     ParseStatus parseStatus,
     List<ParseDiagnostic> diagnostics,
     String packageName,
+    List<String> declaredTypeNames,
+    List<ImportStatement> imports,
     DeclarationCounts declarations,
     LineMetrics lines,
     CommentMarkers markers,
@@ -47,27 +51,32 @@ public record JavaFileAnalysis(
         Objects.requireNonNull(contentSha256);
         Objects.requireNonNull(parseStatus);
         diagnostics = List.copyOf(diagnostics);
+        declaredTypeNames = List.copyOf(declaredTypeNames);
+        imports = List.copyOf(imports);
         methods = List.copyOf(methods);
         boolean parsed = parseStatus == ParseStatus.PARSED;
         boolean hasMetrics = packageName != null && declarations != null && lines != null
             && markers != null && maxMethodComplexity != null;
         boolean hasNoMetrics = packageName == null && declarations == null && lines == null
-            && markers == null && maxMethodComplexity == null && methods.isEmpty();
+            && markers == null && maxMethodComplexity == null && methods.isEmpty()
+            && declaredTypeNames.isEmpty() && imports.isEmpty();
         if (parsed ? !(hasMetrics && diagnostics.isEmpty()) : !(hasNoMetrics && !diagnostics.isEmpty())) {
             throw new IllegalArgumentException("metrics must exist exactly when the file parsed: " + relativePath);
         }
     }
 
     static JavaFileAnalysis parsed(SourceFile file, String sha256, String packageName,
+                                   List<String> declaredTypeNames, List<ImportStatement> imports,
                                    DeclarationCounts declarations, LineMetrics lines,
                                    CommentMarkers markers, List<MethodMeasurement> methods) {
         return new JavaFileAnalysis(file.relativePath(), file.scope(), file.sizeBytes(), file.physicalLines(),
-            sha256, ParseStatus.PARSED, List.of(), packageName, declarations, lines, markers, methods,
-            ComplexityCalculator.maxMethodComplexity(methods));
+            sha256, ParseStatus.PARSED, List.of(), packageName, declaredTypeNames, imports, declarations, lines,
+            markers, methods, ComplexityCalculator.maxMethodComplexity(methods));
     }
 
     static JavaFileAnalysis failed(SourceFile file, String sha256, List<ParseDiagnostic> diagnostics) {
         return new JavaFileAnalysis(file.relativePath(), file.scope(), file.sizeBytes(), file.physicalLines(),
-            sha256, ParseStatus.PARSE_FAILED, diagnostics, null, null, null, null, List.of(), null);
+            sha256, ParseStatus.PARSE_FAILED, diagnostics, null, List.of(), List.of(), null, null, null,
+            List.of(), null);
     }
 }

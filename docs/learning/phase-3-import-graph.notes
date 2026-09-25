@@ -1,0 +1,183 @@
+==============================================================================
+ PHASE 3 NOTES - GRAPH AND EXPLAINABLE PRIORITIES
+==============================================================================
+
+Goal of Phase 3:
+  Phase 2 measured each file ALONE (lines, methods, complexity).
+  Phase 3 looks at files TOGETHER: who imports whom (a graph), and
+  then turns all measurements into an explainable review priority.
+
+Slices:
+  3A  Type index + explicit import graph (explicit-import-v1)     <- DONE (tests pass)
+  3B  structural-v1 risk factors, the 59-point example, priority bands
+  3C  Priority overrides + findings (HIGH_METHOD_COMPLEXITY, LARGE_FILE, ...)
+  3D  CLI fixture report (the "credible fixture report" gate)
+
+------------------------------------------------------------------------------
+ BIG IDEA 1 - A GRAPH IS JUST NODES AND ARROWS
+------------------------------------------------------------------------------
+
+  Node  = one parsed Java file.
+  Edge  = an ARROW  A -> B  meaning "file A imports a type declared in B".
+
+  Direction matters. Read the arrow as "depends on":
+
+      OrderController --> OrderService --> Order
+             |                              ^
+             +------------------------------+
+
+  "Change Order.java. Who might be affected?"  Follow the arrows BACKWARDS:
+  Order is imported by OrderService and OrderController. Those two are
+  review candidates. (That backward walk is slice 3D/V1: impact candidates.)
+
+  fan-out(A) = how many files A imports          (arrows leaving A)
+  fan-in(B)  = how many files import B           (arrows arriving at B)
+
+  In the drawing:  fan-out(OrderController) = 2   fan-in(Order) = 2
+                   fan-out(Order) = 0             fan-in(OrderController) = 0
+
+  Beginner mistake: mixing the two up. "Order has fan-in 2" means two files
+  DEPEND ON Order. High fan-in = many things break if you change it.
+  High fan-out = this file knows about many things (harder to understand).
+
+------------------------------------------------------------------------------
+ BIG IDEA 2 - WHY A MAP (INDEX) INSTEAD OF COMPARING EVERY FILE WITH EVERY FILE
+------------------------------------------------------------------------------
+
+  Naive plan: for every import in every file, look through every other
+  file's declared types to find a match.
+      1,000 files x 10 imports x 1,000 files = 10,000,000 comparisons.
+
+  Index plan (what we built):
+      Pass 1: Map<String, Set<String>>   "app.model.Order" -> {Order.java}
+              one put per declared type.               cost ~ number of types
+      Pass 2: for each import, ONE map lookup.          cost ~ number of imports
+
+  A HashMap lookup does not get slower when the map grows (hash -> bucket).
+  So total work grows with (types + imports), not (files x files).
+  This is what "O(types) + O(imports)" means in Blueprint 9.6.
+
+  Why the map value is a SET of files, not one file:
+  two files could declare the same name (e.g. two copies of dup.Dup).
+  Then the name is AMBIGUOUS. We refuse to guess and create no edge,
+  but we remember the clash in ImportGraph.ambiguousTypes() as a warning.
+  Mutation check (real): made the builder pick the first file instead ->
+  test "do not pick the first match" failed. Restored.
+
+------------------------------------------------------------------------------
+ BIG IDEA 3 - ADJACENCY LISTS (THE SAME EDGES, STORED FOR FAST QUESTIONS)
+------------------------------------------------------------------------------
+
+  ImportGraph keeps the edge list AND two maps built from it:
+
+      outgoing:  A -> {B, C}     answers "what does A import?"    fan-out
+      incoming:  B -> {A}        answers "who imports B?"         fan-in
+
+  Each is Map<String, Set<String>> - a node, then the set of its neighbours.
+  That is an "adjacency list". Two maps = twice the memory of one, but each
+  question becomes one lookup instead of scanning all edges.
+  Memory grows with (files + edges), which is small for any real repo.
+
+  TreeMap / TreeSet everywhere -> sorted -> the same input always prints
+  the same output (reproducibility, Blueprint 9.1). HashMap would work but
+  its order can differ between runs.
+
+------------------------------------------------------------------------------
+ BIG IDEA 4 - ONE IMPORT, ONE BUCKET (ImportEvidence)
+------------------------------------------------------------------------------
+
+  Every import declaration goes into exactly ONE of five buckets:
+
+    import static java.util.Map.entry;       -> static      (never resolved)
+    import static java.util.Collections.*;   -> static      (static wins over wildcard)
+    import java.util.*;                      -> wildcard    (never resolved)
+    import app.model.Order;                  -> resolved    (one declaring file) -> edge
+    import app.OrderService;  (own file)     -> resolved    but NO edge (self)
+    import dup.Dup;  (declared in 2 files)   -> ambiguous   no edge, warning
+    import java.util.List;                   -> unresolved/external
+    import app.model.Order.Line;  (nested)   -> unresolved/external (MVP limit)
+    import gone.Gone;  (file failed parse)   -> unresolved/external
+
+  The record refuses to exist unless the five buckets add up to the total.
+  So the report can always say "we saw 9 imports, 4 became evidence for
+  edges, 5 we could not use" - honest about what the graph did NOT see.
+
+  Why "unresolved OR external" is one bucket: without type information we
+  cannot tell a JDK class from a library from a type in a file that failed
+  to parse. They all look the same: "not in my index".
+
+------------------------------------------------------------------------------
+ BIG IDEA 5 - PURE FUNCTION
+------------------------------------------------------------------------------
+
+  ImportGraphBuilder.build(List<JavaFileAnalysis>) -> ImportGraph
+
+  No file reading, no parser, no clock, no shared mutable state.
+  Same list in, same graph out, every time. That is why it is easy to test
+  (feed records, check edges) and safe to run anywhere (worker, test, CLI).
+  The analyzer calls it once, AFTER the per-file loop, because the index
+  needs every file's declared types before any import can be resolved.
+
+------------------------------------------------------------------------------
+ DUPLICATES AND SELF-EDGES
+------------------------------------------------------------------------------
+
+  import app.model.Order;   (line 2)
+  import app.model.Order;   (line 4)   duplicate
+  import app.model.Money;   (line 3)   same target file? no, Money.java
+
+  -> OrderService -> Order   ONE edge, importedTypes [app.model.Order], lines [2, 4]
+  -> OrderService -> Money   ONE edge
+  If Order.java also declared Money, both imports would collapse into ONE
+  edge with importedTypes [Money, Order]. Edge = file pair, not type pair.
+
+  A file importing its own type resolves fine but creates no edge
+  (an edge A -> A would say "A depends on A": true but useless).
+  Mutation check (real): removed the self guard -> FileEdge threw
+  "a file cannot depend on itself" in 3 tests. The record invariant caught
+  the bug even before the assertions ran.
+
+------------------------------------------------------------------------------
+ REAL RUN - CODEPULSE ANALYZING ITSELF (2026-09-25)
+------------------------------------------------------------------------------
+
+  cd ~/Desktop/CodePulse/backend
+  java -cp "target/classes:$(cat target/classpath.txt)" dev.codepulse.AnalyzeMain .
+
+  java files: 60  parsed: 57  failed: 3   (the 3 broken fixtures)
+  observed import edges (explicit-import-v1): 27
+  import declarations: 316  resolved: 27  wildcard: 1  static: 41
+                       ambiguous: 0  unresolved/external: 247
+
+  Only 27 edges out of 316 imports! And ALL 27 come from the four harness
+  classes in dev.codepulse importing dev.codepulse.engine classes.
+  Every engine class has fan-in from the harnesses only, and fan-out 0.
+
+  Why? All engine classes live in ONE package. Java lets same-package
+  classes use each other WITHOUT an import line. JavaSourceAnalyzer uses
+  SourceInventory, JavaSourceParser, MethodCollector ... and the graph sees
+  none of it. This is blind spot #1 from Blueprint 9.6, in our own code.
+
+  The 41 static imports are the tests' assertEquals/assertTrue.
+  The 247 unresolved are JDK (java.util...), JavaParser, and JUnit types.
+
+------------------------------------------------------------------------------
+ THREE THINGS THE GRAPH CANNOT SEE (gate question - know these cold)
+------------------------------------------------------------------------------
+
+  1. Same-package references (no import line is written)   <- biggest one
+  2. Wildcard imports (import a.b.*;) and static imports
+  3. Fully qualified names used inline (new a.b.C()), nested types,
+     reflection (Class.forName), Spring dependency injection, XML config
+
+  So fan-in / fan-out are LOWER BOUNDS. Always say "observed imports",
+  never "all dependencies", never "call graph".
+
+------------------------------------------------------------------------------
+ NULL vs 0 IN THIS SLICE
+------------------------------------------------------------------------------
+
+  PARSED file that imports nothing        -> fan-out 0   (measured: nothing)
+  PARSE_FAILED file                       -> fan-out null (not a node; not measured)
+  evidence(path) for a failed file        -> null
+  parsed file with zero imports           -> ImportEvidence.NONE (all zeros)

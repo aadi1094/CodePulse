@@ -1,17 +1,33 @@
 package dev.codepulse.engine;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * The engine's complete, immutable output for one workspace.
  *
  * @param inventory the whole-workspace file inventory (all files, not only Java)
  * @param javaFiles one analysis per eligible Java file, in path order
+ * @param importGraph observed explicit imports between the parsed files ({@code explicit-import-v1})
  */
-public record AnalysisResult(InventoryResult inventory, List<JavaFileAnalysis> javaFiles) {
+public record AnalysisResult(InventoryResult inventory, List<JavaFileAnalysis> javaFiles, ImportGraph importGraph) {
 
     public AnalysisResult {
         javaFiles = List.copyOf(javaFiles);
+        Objects.requireNonNull(importGraph);
+        // The graph's nodes must be exactly the parsed files: no more, no fewer.
+        int parsed = 0;
+        for (JavaFileAnalysis file : javaFiles) {
+            if (file.parseStatus() == ParseStatus.PARSED) {
+                parsed++;
+                if (importGraph.evidence(file.relativePath()) == null) {
+                    throw new IllegalArgumentException("parsed file missing from the import graph: " + file.relativePath());
+                }
+            }
+        }
+        if (importGraph.evidenceByFile().size() != parsed) {
+            throw new IllegalArgumentException("import graph has nodes that are not parsed files");
+        }
     }
 
     public int eligibleFileCount() {

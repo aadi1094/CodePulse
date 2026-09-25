@@ -1,7 +1,7 @@
 # Implementation state
-Current phase: 2
-Current slice: Phase 2 complete and committed (2026-09-23); gate met. Phase 3 not started — developer taking a break; resume with "start Phase 3".
-Last working commit: 6f0e79e feat(engine): compute CodePulse cyclomatic-style method complexity (pushed).
+Current phase: 3
+Current slice: 3A committed 2026-09-25 (developer authorized commit and push); 3B/3C in progress.
+Last working commit: ce0e408 feat(engine): analyze a whole workspace with parse coverage (pushed).
 
 ## Implemented and personally verified
 - Slice A (2026-09-23): spec pack moved to `docs/spec/`, links fixed, git initialized on `main`, ignore policy, README. Verified by Claude; developer verification pending.
@@ -84,6 +84,17 @@ Last working commit: 6f0e79e feat(engine): compute CodePulse cyclomatic-style me
   - `JavaSourceAnalyzerTest` 7 tests on a temp workspace (good, broken, invalid-UTF-8, default package, test scope, README, target/ excluded); SHA-256 expectations from `shasum -a 256`.
   - Phase 2 gate fixture: `docs/learning/phase-2-gate-Cart.java` (answers verified with ParseMain, withheld until developer predicts).
 
+- Phase 3 Slice 3A (2026-09-25), implemented and tests pass, developer verification pending:
+  - `engine/ImportStatement` record (name without `.*`, isStatic, wildcard, line; `isSingleType()`); `engine/ImportCollector` reads `CompilationUnit.getImports()` and `getTypes()` (top-level fully qualified names only), no visitor.
+  - `JavaFileAnalysis` gains `declaredTypeNames` and `imports` (both empty for PARSE_FAILED; invariant extended). `AnalysisResult` gains `importGraph` with invariant: graph nodes == parsed files.
+  - `engine/ImportEvidence` record (API `importEvidence` shape): five buckets must add up to `totalImportDeclarations`; `unresolvedExamples` distinct, source order, cap 20, `examplesTruncated`. `NONE` constant for zero imports.
+  - `engine/FileEdge` record (schema `dependency_edge`): sourcePath ≠ targetPath, sorted `importedTypes` and ascending distinct `importLines`, both capped at 20 with `truncated`.
+  - `engine/ImportGraph` final class, `GRAPH_MODE = "explicit-import-v1"`: sorted edge list, `evidenceByFile` (one entry per parsed file), `ambiguousTypes` (name → declaring files), two `TreeMap<String, TreeSet<String>>` adjacency lists (outgoing/incoming). `observedFanOut/FanIn(path)` → Integer, null for non-parsed files. Rejects edges whose endpoints are not parsed nodes and duplicate edges.
+  - `engine/ImportGraphBuilder.build(List<JavaFileAnalysis>)`: pure; pass 1 `HashMap<typeName, TreeSet<path>>` over parsed files (O(types)); pass 2 one lookup per single-type non-static import (O(imports)). Static → static bucket (even `import static X.*`), wildcard → wildcard, missing → unresolved, >1 file → ambiguous (no edge, never first match), exactly one → resolved; self-file → resolved but no edge. Duplicate imports and several types from one target collapse into one edge.
+  - `JavaSourceAnalyzer.analyze` calls the builder once after the per-file loop (Blueprint 9.1 "linking"). `AnalyzeMain` prints fanOut/fanIn columns, every edge with evidence, bucket totals, ambiguity warnings, and the limitation note.
+  - Fixture `fixtures/imports/ShopImports.java` (line-numbered comments, 7 imports, 5 top-level types + 1 nested). `ImportCollectorTest` 5 tests; `ImportGraphBuilderTest` 9 tests through the real analyzer on a temp workspace (hand-drawn 4-edge shop graph, fan-in/out, evidence buckets incl. self and nested, ambiguity, failed file not a node, examples cap 20/26, one edge for 22 types with truncation, empty workspace, constructor invariants).
+  - `docs/learning/phase-3-import-graph.notes`.
+
 ## Commands and observed results
 - 2026-09-23 `java -version` → OpenJDK 21.0.11 (Homebrew). `mvn -version` → Apache Maven 3.9.16. Toolchain ready for Phase 0.
 - 2026-09-23 `git init -b main` → empty repository created; no commits.
@@ -146,7 +157,15 @@ Last working commit: 6f0e79e feat(engine): compute CodePulse cyclomatic-style me
 - 2026-09-23 Mutation check: UTF-8 decoder `REPLACE` instead of `REPORT` → 3 JavaSourceAnalyzerTest failures (BadBytes became PARSED); restored → 75/75.
 - 2026-09-23 `AnalyzeMain .` (backend) → java files 51, parsed 48, failed 3 (MissingBrace SYNTAX_ERROR@8, UnnamedClass UNSUPPORTED_SYNTAX@3, UnnamedVariable SYNTAX_ERROR@6), coverage 94.1%, excluded 81. Max complexity 14 in JavaFileAnalysis and MethodMeasurement constructors. `AnalyzeMain src` → all OTHER_SOURCE (paths lack `src/` prefix; rule working as designed).
 
+- 2026-09-25 `./mvnw -B -q test` (baseline before Phase 3) → exit 0, 75 tests, no failures.
+- 2026-09-25 JavaParser 3.28.2 probe: `getImports()` gives name without `.*`, `isStatic()`, `isAsterisk()`, begin line; duplicate imports are kept as separate declarations; `getTypes()` returns top-level types only; `getFullyQualifiedName()` is `pkg.Name`, or `Name` in the default package; empty file → 0 types, 0 imports.
+- 2026-09-25 `./mvnw -B test` (Slice 3A, first run) → BUILD SUCCESS, `Tests run: 89, Failures: 0, Errors: 0, Skipped: 0` (ImportCollectorTest 5/5, ImportGraphBuilderTest 9/9); all hand-drawn expectations matched on the first run.
+- 2026-09-25 Mutation checks: removed self-edge guard → 3 ImportGraphBuilderTest errors (`IllegalArgumentException: a file cannot depend on itself: src/main/java/app/OrderService.java`); ambiguous → first match → `ambiguousTypeNamesCreateNoEdgeButAWarning` failed (edge `User.java -> a/Dup.java` created); restored → 89/89.
+- 2026-09-25 Developer authorized commits and pushes for this session ("commit and push 3A").
+- 2026-09-25 `AnalyzeMain .` (backend) → java files 60, parsed 57, failed 3 (fixtures), coverage 95.0%, excluded 95; `observed import edges (explicit-import-v1): 27`; `import declarations: 316  resolved: 27  wildcard: 1  static: 41  ambiguous: 0  unresolved/external: 247`. All 27 edges go from the `dev.codepulse` harnesses to `dev.codepulse.engine` classes; engine-to-engine use is same-package and invisible to the graph (Blueprint 9.6 limitation observed on our own code).
+
 ## Known failures or limitations
+- Slice 3A: the graph sees explicit single-type non-static imports only. Same-package references, wildcard and static imports, inline fully qualified names, nested-type imports (`a.b.Outer.Inner`), reflection, and DI are not represented; fan-in/fan-out are lower bounds. A type declared in a PARSE_FAILED file is indistinguishable from an external type. Package-level aggregation (Blueprint 9.6 last paragraph, API `PackageSummary`/`PackageGraph`) and impact BFS (9.7) are not built yet. Ambiguity is exposed as `ImportGraph.ambiguousTypes()`; the run-level `{code,message,count}` warning DTO is Phase 8.
 - Slice 2G: a UTF-8 byte-order mark is not specially handled. Encoding failures carry no line number. The analyzer does not yet support cancellation or an elapsed-time limit (Blueprint 9.1 CancellationProbe, 11.3 120 s cap); planned with the worker in Phase 8. Import graph and priorities are Phase 3.
 - Slice 2F: lambda complexity is not scored (Blueprint 9.4 MVP limitation; lambdas are only counted). Initializer blocks and field initializers are outside the metric. `case null, default ->` is treated as a default entry (adds 0); not separately tested.
 - Slice 2A: parser output is not yet connected to inventory (no per-file PARSED/PARSE_FAILED in InventoryResult); strict UTF-8 decoding of analyzed files is not implemented yet (harness uses Files.readString on trusted files). Other Java 21 preview features besides unnamed classes/variables and string templates are not individually tested. All JavaParser problems map to SYNTAX_ERROR, including preview features its validator rejects.
@@ -187,6 +206,18 @@ Last working commit: 6f0e79e feat(engine): compute CodePulse cyclomatic-style me
 - 2026-09-23 Method range begins at the first annotation/modifier; a preceding Javadoc is not included. methodNcloc includes lines of local/anonymous classes inside the body.
 - 2026-09-23 Invalid UTF-8 → PARSE_FAILED with ENCODING_ERROR (kept in the coverage denominator), not SKIPPED. Blueprint 9.2 requires encoding problems to remain visible in coverage; SKIPPED is reserved for configured limits.
 - 2026-09-23 Inventory uses `Files.walk` + try-with-resources (teaches resource closing, the Phase 1 gate). Alternative `Files.walkFileTree` with SKIP_SUBTREE avoids descending into excluded folders; deferred.
+
+- 2026-09-25 Only top-level types are indexed in `explicit-import-v1`; an import of a nested type stays UNRESOLVED_OR_EXTERNAL. Blueprint 9.6 says "canonical type name" without deciding nested types; indexing member types would require walking every type body and handling shadowing, deferred to V2 with the symbol solver.
+- 2026-09-25 `import static a.B.*;` is counted as static (not wildcard); each import lands in exactly one bucket so the evidence adds up.
+- 2026-09-25 A self-import (file imports its own type) counts as resolved but creates no edge (Blueprint 9.6 "ignore self-file edges").
+- 2026-09-25 Edge evidence caps `importedTypes` and `importLines` at 20 each with one `truncated` flag (API caps `importedTypes` at 20; capping lines too keeps evidence bounded). `importLines` are distinct ascending lines, so a duplicate import shows as two lines.
+- 2026-09-25 `ImportGraph` is a final class with private adjacency maps (built once in the constructor), not a record, following the `ParseOutcome` precedent for derived internal state. Fan values for non-parsed files are `null` (not measured), matching the schema CHECK that `observed_fan_*` is NOT NULL only when PARSED.
+- 2026-09-25 `AnalysisResult` validates that the graph's node set equals its parsed files. The graph is built by the analyzer, not inside the record, so the linking step is visible in the pipeline.
+
+## Current learning gate (Phase 3, open)
+- Developer must: draw A→B for a three-file example and state which way to walk for impact; derive every structural-v1 factor by hand (Slice 3B); name at least three things the import graph cannot observe. Interview: why an import graph is not a call graph or a DI graph.
+- 2026-09-25 Slice 3A answers, first attempt: Q1 one edge per file pair — correct; said the two line numbers "get removed" — wrong (kept as `importLines [2, 4]` evidence). Q2 failed file "got removed" — wrong (still in the result as PARSE_FAILED; not a node because nothing was measured; its types are never indexed so imports of them are unresolved); "empty file gives 0" — correct. Q3 "for easy handling" — wrong (speed: one lookup per import, O(types + imports) vs files × imports). Re-taught with a two-file index walk-through and a 10,000,000 vs 11,000 comparison table.
+- 2026-09-25 Multiple-choice retry: b, b, b — all correct (lines kept as evidence; null = not measured, never 0; map makes each import one lookup). Cart/Item/CartTest prediction skipped at developer's request ("commit and push 3A, continue with 3B and 3C"); recorded as the developer's decision. Slice 3A gate: questions met, prediction not attempted.
 
 ## Current learning gate (Phase 2, passed 2026-09-23) — exercise: docs/learning/phase-2-gate-Cart.java
 - Developer must: manually predict metrics for a new ~20-line fixture, explain every complexity increment, distinguish unsupported/failed data from zero; interview: how parsing differs from compilation.
@@ -242,8 +273,8 @@ Last working commit: 6f0e79e feat(engine): compute CodePulse cyclomatic-style me
   - Gate status: MET for the concept questions on 2026-09-23. Failures vs Errors was corrected in teaching; revisit briefly in Phase 1 when the first test fails.
 
 ## Next smallest slice
-- Phase 3, slice 1: build the unique type-name index from parsed files and the explicit internal import graph (`explicit-import-v1`, Blueprint 9.6) — concept lesson first: graphs, nodes/edges, sets of immutable edge records.
+- Phase 3, slice 3B: `structural-v1` risk factors (Blueprint 10.1): `u(x; low, high)` normalization, five weighted factors (maxMethodComplexity, fileNcloc, maxMethodNcloc, observedFanOut, observedFanIn), unrounded sum, final round-half-up, priority bands (10.2 base bands only; overrides and findings are 3C). Per-factor evidence record (raw, low, high, normalized, weight, contribution). Tests: the exact 59-point PaymentService example, every band boundary (24/25, 49/50, 74/75), clamping at both ends, monotonicity, null score for PARSE_FAILED. Concept lesson first: piecewise linear normalization, why round only once, BigDecimal vs double for a 0–100 score.
 
 ## Suggested commit
-- None pending.
+- `feat(engine): build the explicit-import-v1 file graph with import evidence` — body: ImportCollector records declared top-level types and raw imports per parsed file; ImportGraphBuilder indexes types in one pass and resolves single-type non-static imports with one lookup each into unique directed FileEdges (duplicates and multi-type imports collapsed, self edges ignored, ambiguous names reported not guessed). ImportGraph keeps sorted edges, two adjacency lists for observed fan-out/fan-in (null for unparsed files), and per-file ImportEvidence whose five buckets must add up. AnalyzeMain prints the graph; 14 new tests including a hand-drawn four-edge fixture and two mutation checks.
 
