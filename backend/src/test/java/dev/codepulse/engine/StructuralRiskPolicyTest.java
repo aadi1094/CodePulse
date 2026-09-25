@@ -113,6 +113,24 @@ class StructuralRiskPolicyTest {
     }
 
     @Test
+    void minimumPriorityOverridesRaiseTheBandButNeverTheScore() {
+        assertEquals(List.of(), StructuralRiskPolicy.overrides(new StructuralMeasurements(29, 1999, 0, 0, 0)));
+        assertEquals(List.of("MIN_HIGH_EXTREME_METHOD_COMPLEXITY"),
+            StructuralRiskPolicy.overrides(new StructuralMeasurements(30, 0, 0, 0, 0)));
+        assertEquals(List.of("MIN_HIGH_VERY_LARGE_FILE"),
+            StructuralRiskPolicy.overrides(new StructuralMeasurements(0, 2000, 0, 0, 0)));
+        assertEquals(List.of("MIN_HIGH_EXTREME_METHOD_COMPLEXITY", "MIN_HIGH_VERY_LARGE_FILE"),
+            StructuralRiskPolicy.overrides(new StructuralMeasurements(30, 2000, 0, 0, 0)));
+
+        assertEquals(Priority.HIGH, Priority.LOW.atLeast(Priority.HIGH));
+        assertEquals(Priority.VERY_HIGH, Priority.VERY_HIGH.atLeast(Priority.HIGH), "a floor never lowers");
+        // Complexity 30 alone already scores 50 = HIGH, so that override changes nothing numerically;
+        // 2000 ncloc alone scores 20 = LOW, so that override is the one that matters.
+        assertEquals(50, StructuralRiskPolicy.score(new StructuralMeasurements(30, 0, 0, 0, 0)));
+        assertEquals(20, StructuralRiskPolicy.score(new StructuralMeasurements(0, 2000, 0, 0, 0)));
+    }
+
+    @Test
     void policyIsFrozenUnderItsVersionName() {
         assertEquals("structural-v1", StructuralRiskPolicy.POLICY_VERSION);
         int totalWeight = 0;

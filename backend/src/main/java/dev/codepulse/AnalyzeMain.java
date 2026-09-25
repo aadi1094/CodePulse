@@ -2,6 +2,7 @@ package dev.codepulse;
 
 import dev.codepulse.engine.AnalysisResult;
 import dev.codepulse.engine.FileEdge;
+import dev.codepulse.engine.Finding;
 import dev.codepulse.engine.ImportEvidence;
 import dev.codepulse.engine.ImportGraph;
 import dev.codepulse.engine.JavaFileAnalysis;
@@ -62,6 +63,22 @@ public final class AnalyzeMain {
 
         printImportGraph(graph);
         printHotspots(result);
+        printFindings(result);
+    }
+
+    private static void printFindings(AnalysisResult result) {
+        Map<String, Integer> perRule = new java.util.TreeMap<>();
+        for (Finding f : result.findings()) {
+            perRule.merge(f.ruleCode(), 1, Integer::sum);
+        }
+        System.out.println();
+        System.out.println("findings: " + result.findings().size() + " " + perRule);
+        for (Finding f : result.findings()) {
+            if (f.severity() != dev.codepulse.engine.FindingSeverity.INFO) {
+                System.out.println("  " + f.severity() + " " + f.ruleCode() + " " + f.relativePath()
+                    + (f.beginLine() == null ? "" : ":" + f.beginLine() + "-" + f.endLine()) + "  " + f.message());
+            }
+        }
     }
 
     /** Top five scored files with their factor breakdown: the "explain the score" view. */
@@ -76,7 +93,8 @@ public final class AnalyzeMain {
         System.out.println();
         System.out.println("top hotspots (" + StructuralRiskPolicy.POLICY_VERSION + ", heuristic review order, not defect prediction):");
         for (RiskAssessment a : scored.subList(0, Math.min(5, scored.size()))) {
-            System.out.println("  " + a.score() + " " + a.priority() + "  " + a.relativePath());
+            System.out.println("  " + a.score() + " " + a.priority() + "  " + a.relativePath()
+                + (a.priorityOverrides().isEmpty() ? "" : "  overrides " + a.priorityOverrides()));
             for (RiskFactor f : a.factors()) {
                 System.out.println("      " + f.explanation());
             }

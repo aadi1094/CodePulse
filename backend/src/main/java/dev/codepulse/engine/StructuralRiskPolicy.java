@@ -33,7 +33,6 @@ public final class StructuralRiskPolicy {
 
     public static final String POLICY_VERSION = "structural-v1";
 
-    /** Minimum-priority overrides are Slice 3C; this slice computes bands only. */
     public static final List<FactorDefinition> FACTORS = List.of(
         new FactorDefinition(RiskFactorCode.MAX_COMPLEXITY, 10, 30, 50),
         new FactorDefinition(RiskFactorCode.FILE_NCLOC, 250, 1000, 20),
@@ -42,6 +41,12 @@ public final class StructuralRiskPolicy {
         new FactorDefinition(RiskFactorCode.OBSERVED_FAN_IN, 5, 20, 10));
 
     static final int DISPLAY_SCALE = 10;
+
+    /** Blueprint 10.2 minimum-priority rules: one extreme factor must not be diluted by small ones. */
+    static final int MIN_HIGH_METHOD_COMPLEXITY = 30;
+    static final int MIN_HIGH_FILE_NCLOC = 2000;
+    static final String OVERRIDE_EXTREME_COMPLEXITY = "MIN_HIGH_EXTREME_METHOD_COMPLEXITY";
+    static final String OVERRIDE_VERY_LARGE_FILE = "MIN_HIGH_VERY_LARGE_FILE";
 
     static final String IMPORT_GRAPH_LIMITATION = "Import analysis counts explicit single-type imports only; "
         + "same-package references, wildcard and static imports, reflection, and dependency injection are not observed.";
@@ -64,8 +69,25 @@ public final class StructuralRiskPolicy {
         if (file.declarations().executableCount() == 0) {
             limitations.add("No method or constructor bodies; maximum complexity is 0 because nothing was measurable, not because code is simple.");
         }
+        List<String> overrides = overrides(measurements);
+        Priority priority = overrides.isEmpty() ? bandFor(score) : bandFor(score).atLeast(Priority.HIGH);
         return new RiskAssessment(file.relativePath(), POLICY_VERSION, graph.graphMode(), score,
-            bandFor(score), factors, List.of(), signals(file.markers()), limitations);
+            priority, factors, overrides, signals(file.markers()), limitations);
+    }
+
+    /**
+     * Codes of the minimum-HIGH rules that fire. The score itself is never changed; the report shows
+     * the band the score earned and the rule that raised it.
+     */
+    static List<String> overrides(StructuralMeasurements measurements) {
+        List<String> fired = new ArrayList<>();
+        if (measurements.maxMethodComplexity() >= MIN_HIGH_METHOD_COMPLEXITY) {
+            fired.add(OVERRIDE_EXTREME_COMPLEXITY);
+        }
+        if (measurements.fileNcloc() >= MIN_HIGH_FILE_NCLOC) {
+            fired.add(OVERRIDE_VERY_LARGE_FILE);
+        }
+        return fired;
     }
 
     /** {@code u(x; low, high)} as a 10-decimal approximation of the exact fraction. */

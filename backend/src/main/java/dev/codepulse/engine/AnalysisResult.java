@@ -10,13 +10,15 @@ import java.util.Objects;
  * @param javaFiles one analysis per eligible Java file, in path order
  * @param importGraph observed explicit imports between the parsed files ({@code explicit-import-v1})
  * @param assessments one {@code structural-v1} assessment per eligible Java file, in the same order
+ * @param findings    rule-triggered notes for all files, sorted by path, then line, then rule
  */
 public record AnalysisResult(InventoryResult inventory, List<JavaFileAnalysis> javaFiles, ImportGraph importGraph,
-                             List<RiskAssessment> assessments) {
+                             List<RiskAssessment> assessments, List<Finding> findings) {
 
     public AnalysisResult {
         javaFiles = List.copyOf(javaFiles);
         assessments = List.copyOf(assessments);
+        findings = List.copyOf(findings);
         Objects.requireNonNull(importGraph);
         if (assessments.size() != javaFiles.size()) {
             throw new IllegalArgumentException("every eligible file needs exactly one assessment");
@@ -42,6 +44,17 @@ public record AnalysisResult(InventoryResult inventory, List<JavaFileAnalysis> j
         if (importGraph.evidenceByFile().size() != parsed) {
             throw new IllegalArgumentException("import graph has nodes that are not parsed files");
         }
+    }
+
+    /** @return this file's findings in report order; empty when it has none */
+    public List<Finding> findings(String relativePath) {
+        List<Finding> own = new java.util.ArrayList<>();
+        for (Finding finding : findings) {
+            if (finding.relativePath().equals(relativePath)) {
+                own.add(finding);
+            }
+        }
+        return List.copyOf(own);
     }
 
     /** @return the assessment of one eligible file, or null if the path is not an eligible Java file */

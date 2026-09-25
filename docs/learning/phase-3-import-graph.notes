@@ -181,3 +181,129 @@ Slices:
   PARSE_FAILED file                       -> fan-out null (not a node; not measured)
   evidence(path) for a failed file        -> null
   parsed file with zero imports           -> ImportEvidence.NONE (all zeros)
+
+
+==============================================================================
+ SLICES 3B + 3C - THE structural-v1 SCORE, OVERRIDES, AND FINDINGS
+==============================================================================
+
+------------------------------------------------------------------------------
+ BIG IDEA 6 - NORMALIZE FIRST, THEN WEIGHT, THEN ROUND ONCE
+------------------------------------------------------------------------------
+
+  Five measurements have five different units (complexity, lines, files).
+  You cannot add them. So each one is first turned into a 0..1 number:
+
+      u(x; low, high) = clamp( (x - low) / (high - low), 0, 1 )
+
+      below low        -> 0     (nothing to worry about yet)
+      at/above high    -> 1     (fully "on")
+      in between       -> a straight line
+
+  Then each u is multiplied by its weight (how many of the 100 points it may
+  earn) and the five products are added:
+
+      50 * u(maxComplexity; 10, 30)
+    + 20 * u(fileNcloc;     250, 1000)
+    + 10 * u(maxMethodNcloc; 40, 120)
+    + 10 * u(fanOut;          5, 20)
+    + 10 * u(fanIn;           5, 20)
+
+  The Blueprint's PaymentService example, by hand:
+      complexity 24   (24-10)/20 = 0.70   x 50 = 35
+      ncloc 700       450/750    = 0.60   x 20 = 12
+      method ncloc 88  48/80     = 0.60   x 10 =  6
+      fanOut 11         6/15     = 0.40   x 10 =  4
+      fanIn 8           3/15     = 0.20   x 10 =  2
+                                          total  59  -> HIGH (50-74)
+  Our test asserts exactly these numbers.
+
+  Bands: LOW 0-24, MODERATE 25-49, HIGH 50-74, VERY_HIGH 75-100.
+
+------------------------------------------------------------------------------
+ BIG IDEA 7 - WHY WE DO NOT ROUND EACH FACTOR (and why not doubles)
+------------------------------------------------------------------------------
+
+  20 * 50/750 = 4/3 = 1.3333...  never ends.
+  If we store it as 1.3333333333 (rounded DOWN) three times and add:
+      2.5 + 1.3333333333 + 1.3333333333 + 1.3333333333 = 6.4999999999 -> rounds to 6
+  The TRUE value is 2.5 + 4 = 6.5 -> must round to 7.
+
+  Doubles have the same problem in binary (0.1 + 0.2 != 0.3).
+
+  Fix (school maths): put every fraction over a COMMON DENOMINATOR.
+      ranges are 20, 750, 80, 15, 15 -> lcm = 6000
+      each term = weight * excess * (6000 / range)   <- an exact integer
+      score = (sum of integers) / 6000, rounded half-up ONCE.
+  BigInteger does the integer part, BigDecimal.divide(..., 0, HALF_UP) rounds.
+
+  Mutation check (real): I first wrote a test case (11, 300, 0, 6, 0) = 2.5 +
+  4/3 + 2/3 and the decimal-sum mutant SURVIVED, because 1.3333333333 (down)
+  + 0.6666666667 (up) = 2.0000000000 exactly - the errors cancelled.
+  Lesson: a boundary test must make all rounding errors go the same way.
+  New case (11, 300, 0, 7, 7): three 4/3 terms -> mutant gave 6, expected 7.
+
+------------------------------------------------------------------------------
+ BIG IDEA 8 - OVERRIDES CHANGE THE LABEL, NEVER THE NUMBER
+------------------------------------------------------------------------------
+
+  A 2000-line file with trivial methods scores 20 -> LOW. That hides a real
+  reading burden. Blueprint 10.2: complexity >= 30 or ncloc >= 2000 sets a
+  MINIMUM priority of HIGH.
+
+      score 20, band LOW, override MIN_HIGH_VERY_LARGE_FILE -> priority HIGH
+      score stays 20. The report shows both, so nothing is secret.
+
+  Observation: complexity 30 alone already scores 50 = HIGH, so that override
+  never changes the band with the v1 weights. It is still listed (the rule
+  is part of the policy and the weights may change in v2).
+
+  Priority.atLeast(floor): max of the two ranks. A floor never lowers.
+
+------------------------------------------------------------------------------
+ BIG IDEA 9 - FINDINGS ARE POINTERS, THE SCORE IS AN ORDER
+------------------------------------------------------------------------------
+
+  Score  = one number per file, smooth, for SORTING files.
+  Finding = one yes/no rule that fired, with a LINE RANGE, for JUMPING to code.
+
+  Rules (findings-v1):
+    EXTREME_METHOD_COMPLEXITY  complexity >= 30   HIGH     (replaces HIGH_...)
+    HIGH_METHOD_COMPLEXITY     complexity >= 20   WARNING
+    LONG_METHOD                method ncloc >= 80 WARNING
+    VERY_LARGE_FILE            ncloc >= 2000      HIGH     (replaces LARGE_FILE)
+    LARGE_FILE                 ncloc >= 1000      WARNING
+    FIXME_MARKER               count >= 1         WARNING  (count only, no text)
+    TODO_MARKER                count >= 1         INFO
+    UNRESOLVED_IMPORTS         count >= 1         INFO
+    PARSE_FAILED               file did not parse WARNING  (the only finding then)
+
+  Thresholds differ from where the score starts rising (score grows from
+  complexity 11, finding fires at 20). That is intended: the score should
+  order files smoothly; the finding should be rare enough to be read.
+
+  Evidence is typed data only: {"complexity": 30, "signature": "deep(int)"}.
+  Never the comment text ("// TODO fix the payment bug" stays in the repo).
+
+------------------------------------------------------------------------------
+ REAL RUN - CODEPULSE ANALYZING ITSELF, AFTER 3C
+------------------------------------------------------------------------------
+
+  top hotspot: 15 LOW  JavaFileAnalysis.java  (complexity 16 -> 15 of 50)
+  Nothing reaches MODERATE. Our own code is small and flat, as expected.
+
+  findings: 64 {FIXME_MARKER=3, PARSE_FAILED=3, TODO_MARKER=5, UNRESOLVED_IMPORTS=53}
+  The FIXME "findings" in CommentMarkerCounter.java and RiskAssessment.java
+  are Javadoc sentences that MENTION the word FIXME. The counter is
+  word-based and cannot know the difference - a limitation worth saying
+  out loud in an interview.
+
+------------------------------------------------------------------------------
+ GATE CHECKLIST (Phase 3)
+------------------------------------------------------------------------------
+
+  [ ] Draw A -> B for three files, say which way to walk for impact on B.
+  [ ] Derive one score by hand (all five u values, weights, one rounding).
+  [ ] Name three things the graph cannot see (same package, wildcard/static,
+      inline FQN / reflection / DI).
+  [ ] Say why an override is shown separately instead of adding points.
