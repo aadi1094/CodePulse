@@ -65,6 +65,21 @@ public record JavaFileAnalysis(
         }
     }
 
+    /**
+     * @return the longest method's ncloc, 0 when the file has no methods; {@code null} if not parsed.
+     *         Derived from {@link #methods()} so it can never disagree with them.
+     */
+    public Integer maxMethodNcloc() {
+        if (parseStatus() != ParseStatus.PARSED) {
+            return null;
+        }
+        int max = 0;
+        for (MethodMeasurement method : methods) {
+            max = Math.max(max, method.ncloc());
+        }
+        return max;
+    }
+
     static JavaFileAnalysis parsed(SourceFile file, String sha256, String packageName,
                                    List<String> declaredTypeNames, List<ImportStatement> imports,
                                    DeclarationCounts declarations, LineMetrics lines,

@@ -8,9 +8,14 @@ import dev.codepulse.engine.JavaFileAnalysis;
 import dev.codepulse.engine.JavaSourceAnalyzer;
 import dev.codepulse.engine.LocalDirectoryWorkspace;
 import dev.codepulse.engine.ParseDiagnostic;
+import dev.codepulse.engine.RiskAssessment;
+import dev.codepulse.engine.RiskFactor;
+import dev.codepulse.engine.StructuralRiskPolicy;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -30,8 +35,8 @@ public final class AnalyzeMain {
         AnalysisResult result = new JavaSourceAnalyzer().analyze(new LocalDirectoryWorkspace(Path.of(args[0])));
 
         ImportGraph graph = result.importGraph();
-        System.out.printf("%-58s %-12s %-12s %6s %8s %6s %6s %6s%n",
-            "file", "scope", "status", "ncloc", "methods", "maxCx", "fanOut", "fanIn");
+        System.out.printf("%-58s %-12s %-12s %6s %8s %6s %6s %6s %5s %-10s%n",
+            "file", "scope", "status", "ncloc", "methods", "maxCx", "fanOut", "fanIn", "score", "priority");
         for (JavaFileAnalysis f : result.javaFiles()) {
             if (f.lines() == null) {
                 StringBuilder why = new StringBuilder();
@@ -40,9 +45,11 @@ public final class AnalyzeMain {
                 }
                 System.out.printf("%-58s %-12s %-12s %s%n", f.relativePath(), f.scope(), f.parseStatus(), why.toString().trim());
             } else {
-                System.out.printf("%-58s %-12s %-12s %6d %8d %6d %6d %6d%n", f.relativePath(), f.scope(), f.parseStatus(),
-                    f.lines().ncloc(), f.methods().size(), f.maxMethodComplexity(),
-                    graph.observedFanOut(f.relativePath()), graph.observedFanIn(f.relativePath()));
+                RiskAssessment risk = result.assessment(f.relativePath());
+                System.out.printf("%-58s %-12s %-12s %6d %8d %6d %6d %6d %5d %-10s%n", f.relativePath(), f.scope(),
+                    f.parseStatus(), f.lines().ncloc(), f.methods().size(), f.maxMethodComplexity(),
+                    graph.observedFanOut(f.relativePath()), graph.observedFanIn(f.relativePath()),
+                    risk.score(), risk.priority());
             }
         }
         System.out.println();
@@ -54,6 +61,26 @@ public final class AnalyzeMain {
         System.out.println("excluded files (not analyzed): " + result.inventory().excludedFileCount());
 
         printImportGraph(graph);
+        printHotspots(result);
+    }
+
+    /** Top five scored files with their factor breakdown: the "explain the score" view. */
+    private static void printHotspots(AnalysisResult result) {
+        List<RiskAssessment> scored = new ArrayList<>();
+        for (RiskAssessment a : result.assessments()) {
+            if (a.score() != null) {
+                scored.add(a);
+            }
+        }
+        scored.sort(Comparator.comparing(RiskAssessment::score).reversed().thenComparing(RiskAssessment::relativePath));
+        System.out.println();
+        System.out.println("top hotspots (" + StructuralRiskPolicy.POLICY_VERSION + ", heuristic review order, not defect prediction):");
+        for (RiskAssessment a : scored.subList(0, Math.min(5, scored.size()))) {
+            System.out.println("  " + a.score() + " " + a.priority() + "  " + a.relativePath());
+            for (RiskFactor f : a.factors()) {
+                System.out.println("      " + f.explanation());
+            }
+        }
     }
 
     private static void printImportGraph(ImportGraph graph) {

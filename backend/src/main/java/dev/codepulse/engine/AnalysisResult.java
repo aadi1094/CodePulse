@@ -9,12 +9,26 @@ import java.util.Objects;
  * @param inventory the whole-workspace file inventory (all files, not only Java)
  * @param javaFiles one analysis per eligible Java file, in path order
  * @param importGraph observed explicit imports between the parsed files ({@code explicit-import-v1})
+ * @param assessments one {@code structural-v1} assessment per eligible Java file, in the same order
  */
-public record AnalysisResult(InventoryResult inventory, List<JavaFileAnalysis> javaFiles, ImportGraph importGraph) {
+public record AnalysisResult(InventoryResult inventory, List<JavaFileAnalysis> javaFiles, ImportGraph importGraph,
+                             List<RiskAssessment> assessments) {
 
     public AnalysisResult {
         javaFiles = List.copyOf(javaFiles);
+        assessments = List.copyOf(assessments);
         Objects.requireNonNull(importGraph);
+        if (assessments.size() != javaFiles.size()) {
+            throw new IllegalArgumentException("every eligible file needs exactly one assessment");
+        }
+        for (int i = 0; i < javaFiles.size(); i++) {
+            JavaFileAnalysis file = javaFiles.get(i);
+            RiskAssessment assessment = assessments.get(i);
+            if (!file.relativePath().equals(assessment.relativePath())
+                || (file.parseStatus() == ParseStatus.PARSED) == (assessment.score() == null)) {
+                throw new IllegalArgumentException("assessment does not match its file: " + file.relativePath());
+            }
+        }
         // The graph's nodes must be exactly the parsed files: no more, no fewer.
         int parsed = 0;
         for (JavaFileAnalysis file : javaFiles) {
@@ -28,6 +42,16 @@ public record AnalysisResult(InventoryResult inventory, List<JavaFileAnalysis> j
         if (importGraph.evidenceByFile().size() != parsed) {
             throw new IllegalArgumentException("import graph has nodes that are not parsed files");
         }
+    }
+
+    /** @return the assessment of one eligible file, or null if the path is not an eligible Java file */
+    public RiskAssessment assessment(String relativePath) {
+        for (RiskAssessment assessment : assessments) {
+            if (assessment.relativePath().equals(relativePath)) {
+                return assessment;
+            }
+        }
+        return null;
     }
 
     public int eligibleFileCount() {

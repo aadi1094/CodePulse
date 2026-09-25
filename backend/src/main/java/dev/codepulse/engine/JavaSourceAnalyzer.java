@@ -25,7 +25,7 @@ import java.util.List;
  * <pre>
  * workspace -> inventory -> for each .java file (in path order):
  *     bounded read -> SHA-256 -> strict UTF-8 -> parse -> measure (only if PARSED)
- *   then: index declared types -> build explicit import graph
+ *   then: index declared types -> build explicit import graph -> score every file (structural-v1)
  * </pre>
  *
  * <p>One file is processed at a time and its syntax tree is dropped as soon as its numbers are
@@ -62,7 +62,13 @@ public final class JavaSourceAnalyzer {
             }
         }
         // Linking step (Blueprint 9.1): needs every file's declared types, so it runs after the loop.
-        return new AnalysisResult(files, javaFiles, ImportGraphBuilder.build(javaFiles));
+        ImportGraph graph = ImportGraphBuilder.build(javaFiles);
+        // Scoring step: needs fan-in/fan-out, so it runs after linking.
+        List<RiskAssessment> assessments = new ArrayList<>();
+        for (JavaFileAnalysis file : javaFiles) {
+            assessments.add(StructuralRiskPolicy.assess(file, graph));
+        }
+        return new AnalysisResult(files, javaFiles, graph, assessments);
     }
 
     private JavaFileAnalysis analyzeFile(Path root, SourceFile file) throws IOException {
